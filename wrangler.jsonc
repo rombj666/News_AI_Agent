@@ -1,0 +1,6 @@
+{
+  "name": "personalized-news-ai-agent",
+  "main": "src/entrypoints/worker.ts",
+  "compatibility_date": "2026-09-17"
+  // No cron, credentials, live routes, or deployment command until later milestones.
+}

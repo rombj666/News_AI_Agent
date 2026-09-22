@@ -1,0 +1,27 @@
+{
+  "name": "personalized-news-ai-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "tsx --import ./scripts/offline-guard.mjs --test --test-concurrency=1 tests/*.test.ts",
+    "demo": "tsx --import ./scripts/offline-guard.mjs scripts/demo.ts",
+    "demo:quality": "tsx --import ./scripts/offline-guard.mjs scripts/quality-demo.ts",
+    "test:live:retrieval": "node --env-file-if-exists=.env --import tsx scripts/retrieval-live.ts",
+    "test:live:openai": "node --env-file-if-exists=.env --import tsx scripts/openai-live.ts"
+  },
+  "dependencies": {
+    "fast-xml-parser": "5.11.1",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.8",
+    "@types/node": "22.20.3",
+    "tsx": "4.23.13",
+    "typescript": "7.0.2"
+  }
+}

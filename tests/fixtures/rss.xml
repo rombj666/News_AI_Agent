@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>Example Science</title>
+  <item><title>New AI research &amp; chips!</title><link>https://example.com/news/ai?utm_source=feed</link><description><![CDATA[<p>Scientists announce <b>new chips</b>.</p>]]></description><pubDate>Thu, 17 Sep 2026 00:00:00 GMT</pubDate><guid>story-1</guid></item>
+  <item><title>New AI research and chips</title><link>https://example.com/news/ai?utm_medium=rss#top</link><description>Duplicate URL.</description><pubDate>Thu, 17 Sep 2026 00:00:00 GMT</pubDate></item>
+  <item><title>NEW AI RESEARCH &amp; CHIPS</title><link>https://example.com/news/alias</link><description>Duplicate title.</description><pubDate>Thu, 17 Sep 2026 00:00:00 GMT</pubDate></item>
+  <item><title>Archived story</title><link>https://example.com/old</link><pubDate>Thu, 01 Jan 2026 00:00:00 GMT</pubDate></item>
+  <item><title>Undated story</title><link>https://example.com/undated</link><description>No date provided.</description></item>
+  <item><title>Missing URL</title></item>
+  <item><title>Future story</title><link>https://example.com/future</link><pubDate>Thu, 01 Oct 2026 00:00:00 GMT</pubDate></item>
+  <item><title>Blocked publisher</title><link>https://blocked.example.com/story</link><pubDate>Thu, 17 Sep 2026 00:00:00 GMT</pubDate></item>
+</channel></rss>

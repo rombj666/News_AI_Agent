@@ -1,0 +1,10 @@
+{
+  "type": "news",
+  "query": { "original": "AI news" },
+  "results": [
+    { "title": "New AI research &amp; chips!", "url": "https://example.com/news/ai?utm_campaign=search", "description": "<b>Brave</b> snippet", "page_age": "2026-09-17T00:00:00Z", "age": "1 hour ago", "profile": { "name": "Example" } },
+    { "title": "A different publisher", "url": "https://other.example.com/new", "description": "Fresh news", "page_age": "2026-09-17T00:15:00Z", "profile": { "name": "Other publisher" }, "extra_snippets": ["More context"] },
+    { "title": "Relative date only", "url": "https://example.com/relative", "age": "2 days ago", "description": null },
+    { "title": "Broken result without URL" }
+  ]
+}
