@@ -39,3 +39,22 @@ fix only after both results are known:
 The current production runtime releases each Neon transaction before calling
 Telegram. The runtime pool can retain an idle WebSocket briefly, but no runtime,
 collector, or quality transaction spans the interactive Telegram fetch.
+
+## Proven result and selected fix
+
+Production testing returned PASS with HTTP 200 JSON responses from both fetch
+and scheduled handlers. Cloudflare-to-Telegram egress is therefore available.
+`TELEGRAM_EGRESS_DIAGNOSTIC` remains `NO`.
+
+The application transport now matches the successful probe for outbound API
+methods: plain Worker `fetch`, JSON headers/body, and `response.text()` followed
+by JSON validation. Only local long polling attaches an abort/timeout signal.
+
+Webhook handling durably inserts a new update, responds to Telegram, and places
+processing in `ctx.waitUntil`. A duplicate inbox key does not schedule processing
+again. Cron retains the same drain operation as recovery and continues to own
+scheduled news execution. Runtime-only interactive processing does not construct
+collector or quality pools. Production Neon transactions destroy their checked-
+out connection after commit/rollback, freeing the Worker outbound connection
+slot before Telegram delivery. Router and delivery transactions, update claims,
+uncertain outcomes, delivery accounting, and photo fallback rules are unchanged.

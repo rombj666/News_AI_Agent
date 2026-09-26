@@ -5,8 +5,9 @@ export async function enqueueUpdate(db:Database,userId:string,botId:string,updat
   return asUser(db,userId,async tx=>{
     const active=await tx.query("SELECT id FROM users WHERE id=$1 AND telegram_user_id=$2 AND status='active'",[userId,String(update.callback_query?.from.id??update.message?.from?.id)]);
     if(!active.rows.length)throw Error('PRODUCTION_IDENTITY_NOT_READY');
-    await tx.query(`INSERT INTO telegram_webhook_inbox(user_id,bot_id,update_id,payload) VALUES($1,$2,$3,$4::jsonb)
-      ON CONFLICT DO NOTHING`,[userId,botId,update.update_id,JSON.stringify(update)]);
+    const inserted=await tx.query(`INSERT INTO telegram_webhook_inbox(user_id,bot_id,update_id,payload) VALUES($1,$2,$3,$4::jsonb)
+      ON CONFLICT DO NOTHING RETURNING update_id`,[userId,botId,update.update_id,JSON.stringify(update)]);
+    return inserted.rows.length===1;
   });
 }
 

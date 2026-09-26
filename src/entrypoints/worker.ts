@@ -1,5 +1,5 @@
 import { productionConfig,type ProductionEnv } from '../production/config.js';
-import { productionReady,productionTick } from '../production/runtime.js';
+import { processInteractiveInbox,productionReady,productionTick } from '../production/runtime.js';
 import { neonDatabase } from '../db/neon.js';
 import { enqueueUpdate } from '../production/inbox.js';
 import { telegramUpdateSchema,type TelegramUpdate } from '../adapters/telegram/types.js';
@@ -25,14 +25,14 @@ async function readUpdate(request:Request):Promise<TelegramUpdate> {
 }
 // Dependency injection keeps every normal Worker test offline.
 export function createWorker(deps={
-  ready:productionReady,tick:productionTick,egress:telegramEgress,
+  ready:productionReady,tick:productionTick,processInbox:processInteractiveInbox,egress:telegramEgress,
   enqueue:async(config:ReturnType<typeof productionConfig>,userId:string,update:TelegramUpdate)=>{
     const connection=neonDatabase(config.runtimeUrl,'news_runtime');
-    try{await enqueueUpdate(connection.db,userId,config.telegram.botId,update);}finally{await connection.close();}
+    try{return await enqueueUpdate(connection.db,userId,config.telegram.botId,update);}finally{await connection.close();}
   },
 }) {
   return {
-    async fetch(request:Request,env:ProductionEnv={}):Promise<Response> {
+    async fetch(request:Request,env:ProductionEnv={},ctx?:{waitUntil(promise:Promise<unknown>):void}):Promise<Response> {
       const path=new URL(request.url).pathname;
       if(request.method==='GET'&&path==='/health')return Response.json({status:'ok',service:'news-ai-agent',liveIntegrations:false});
       if(request.method==='GET'&&path==='/ready') {
@@ -55,7 +55,9 @@ export function createWorker(deps={
         const config=productionConfig(env),callback=update.callback_query,message=callback?.message??update.message,sender=callback?.from??message?.from;
         if(!sender||sender.is_bot||message?.chat.type!=='private'||message.chat.id!==sender.id)return new Response(null,{status:200});
         const userId=config.identities.get(String(sender.id));if(!userId)return new Response(null,{status:200});
-        await deps.enqueue(config,userId,update);return new Response(null,{status:200});
+        const inserted=await deps.enqueue(config,userId,update);
+        if(inserted&&ctx)ctx.waitUntil(deps.processInbox(env,[userId]));
+        return new Response(null,{status:200});
       }catch{console.error('PRODUCTION_WEBHOOK_PERSIST_FAILED');return new Response(null,{status:503});}
     },
     async scheduled(event:{scheduledTime:number},env:ProductionEnv):Promise<void> {

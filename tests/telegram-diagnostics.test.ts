@@ -54,8 +54,8 @@ test('Telegram transport accepts Cloudflare-style JSON content type and success 
     {status:200,headers:{'content-type':'application/json; charset=utf-8'}});},0,s=>logs.push(s));
   assert.equal(await api.sendMessage('12345',renderText('hello')[0]!),987);
   assert.equal(requestUrl,`https://api.telegram.org/bot${token}/sendMessage`);
-  assert.equal(requestInit?.method,'POST');assert.equal((requestInit?.headers as Record<string,string>)['content-type'],'application/json');
-  assert.ok(requestInit?.signal instanceof AbortSignal);assert.deepEqual(JSON.parse(String(requestInit?.body)),{
+  assert.equal(requestInit?.method,'POST');assert.deepEqual(requestInit?.headers,{'Content-Type':'application/json','Accept':'application/json'});
+  assert.equal(requestInit?.signal,undefined);assert.deepEqual(JSON.parse(String(requestInit?.body)),{
     chat_id:'12345',text:'hello',parse_mode:'HTML',link_preview_options:{is_disabled:true}});
   assert.match(logs.join('\n'),/method=sendMessage status=200 content_type=json bytes=\d+ category=TELEGRAM_SUCCESS/);
 });

@@ -30,18 +30,30 @@ export async function productionReady(env:ProductionEnv) {
     if(config.schedule)schedulingConfig({...env,RUN_LIVE_SCHEDULED_PIPELINE:'YES'});
   }finally{await db.close();}
 }
-export async function productionTick(env:ProductionEnv,now=new Date()) {
-  const config=productionConfig(env),db=productionDatabases(config),deadline=Date.now()+10*60000;
+export async function processInteractiveInbox(env:ProductionEnv,userIds?:readonly string[]) {
+  const config=productionConfig(env),connection=neonDatabase(config.runtimeUrl,'news_runtime');
   try {
     const transport=new TelegramApi(config.telegram.token,fetch,1100,console.log);
-    const model=config.telegram.aiEnabled||config.schedule?new OpenAIResponses(env):null;
-    const router=createTelegramRouter({db:db.runtime,botId:config.telegram.botId,identities:config.identities,transport,
-      ai:config.telegram.aiEnabled?{model:model!,limits:config.telegram.limits!}:null,log:console.log});
-    for(const [,userId] of config.identities) {
-      if(Date.now()>=deadline)break;
-      await drainInbox(db.runtime,userId,config.telegram.botId,raw=>router(raw),5,deadline);
+    const model=config.telegram.aiEnabled?new OpenAIResponses(env):null;
+    const router=createTelegramRouter({db:connection.db,botId:config.telegram.botId,identities:config.identities,transport,
+      ai:model?{model,limits:config.telegram.limits!}:null,log:console.log});
+    const selected=userIds??[...config.identities.values()];
+    for(const userId of selected) {
+      if(![...config.identities.values()].includes(userId))continue;
+      await drainInbox(connection.db,userId,config.telegram.botId,raw=>router(raw),5,Date.now()+240000);
     }
-    if(!config.schedule)return;
+  }finally{await connection.close();}
+}
+export async function productionTick(env:ProductionEnv,now=new Date()) {
+  const config=productionConfig(env),deadline=Date.now()+10*60000;
+  // Recovery of pending interactive updates runs with only the runtime role.
+  // Its connection is fully closed before scheduled collection/generation begins.
+  await processInteractiveInbox(env);
+  if(!config.schedule)return;
+  const db=productionDatabases(config);
+  try {
+    const transport=new TelegramApi(config.telegram.token,fetch,1100,console.log);
+    const model=new OpenAIResponses(env);
     const schedule=schedulingConfig({...env,RUN_LIVE_SCHEDULED_PIPELINE:'YES'});
     const sources:CollectionSource[]=config.sources.map(source=>({retriever:new RssRetriever(source),request:{source,category:source.category,limit:30}}));
     if(schedule.braveQuery) {
@@ -50,7 +62,7 @@ export async function productionTick(env:ProductionEnv,now=new Date()) {
     }
     for(const [telegramId,userId] of config.identities) {
       if(Date.now()>=deadline)break;
-      const result=await runScheduledPipeline({db:db.runtime,collector:db.collector,quality:db.quality,model:model!,transport,
+      const result=await runScheduledPipeline({db:db.runtime,collector:db.collector,quality:db.quality,model,transport,
         botId:config.telegram.botId,sources,rankingLimits:schedule.rankingLimits,digestLimits:schedule.digestLimits,
         notifyEmpty:schedule.notifyEmpty,log:console.log},userId,telegramId,now);
       console.log(`PRODUCTION_SCHEDULE_RESULT: ${result.status}`);

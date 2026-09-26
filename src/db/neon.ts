@@ -21,7 +21,7 @@ function queries(client:Client):Queryable {
 
 // Interactive transactions stay on ONE checked-out WebSocket connection.
 // No transaction retry: an ambiguous COMMIT could already have reserved usage.
-export function pooledDatabase(pool:TransactionPool,role?:DatabaseRole):Database {
+export function pooledDatabase(pool:TransactionPool,role?:DatabaseRole,destroyAfterTransaction=false):Database {
   const db:Database={
     query:<T>(sql:string,params?:unknown[])=>db.transaction(tx=>tx.query<T>(sql,params)),
     exec:sql=>db.transaction(tx=>tx.exec(sql)),
@@ -43,7 +43,7 @@ export function pooledDatabase(pool:TransactionPool,role?:DatabaseRole):Database
         const result=await work(queries(client));
         await client.query('COMMIT');return result;
       }catch(error){destroy=true;try{await client.query('ROLLBACK');}catch{/* discard connection */}throw error;}
-      finally{client.release(destroy);}
+      finally{client.release(destroy||destroyAfterTransaction);}
     },
   };return db;
 }
@@ -52,5 +52,7 @@ export function neonDatabase(url:string,role?:DatabaseRole) {
   const pool=new Pool({connectionString:validateNeonUrl(url),max:3,connectionTimeoutMillis:15000,idleTimeoutMillis:1000});
   // Never print driver errors: they can contain SQL, private data or credentials.
   pool.on('error',()=>{});
-  return {db:pooledDatabase(pool,role),close:()=>pool.end()};
+  // Workers do not benefit from retaining a WebSocket between event invocations.
+  // Closing after each transaction frees the outbound slot before Telegram fetch.
+  return {db:pooledDatabase(pool,role,true),close:()=>pool.end()};
 }

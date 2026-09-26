@@ -25,18 +25,20 @@ export class TelegramApi implements TelegramPolling {
     body:unknown,
     signal?:AbortSignal,
   ):Promise<unknown> {
-    const timeoutSignal=AbortSignal.timeout(method==='getUpdates'?35000:15000);
-    const combined=signal?AbortSignal.any([signal,timeoutSignal]):timeoutSignal;
+    // Cloudflare production sends intentionally use the same plain fetch shape as
+    // the proven getMe egress probe. Long polling alone needs an abort signal.
+    const timeoutSignal=method==='getUpdates'?AbortSignal.timeout(35000):null;
+    const combined=method==='getUpdates'?(signal?AbortSignal.any([signal,timeoutSignal!]):timeoutSignal!):undefined;
     const detail=(status:number,contentType:string,bytes:number,category:string)=>
       this.log(`TELEGRAM_HTTP_DIAGNOSTIC: method=${method} status=${status} content_type=${contentType} bytes=${bytes} category=${category}`);
     let response:Response;
     try {
       const url = `https://api.telegram.org/bot${this.#token}/${method}`;
-      response=await this.fetcher(url,{method:'POST',headers:{'content-type':'application/json','accept':'application/json'},
-        body:JSON.stringify(body),signal:combined,redirect:'error'});
+      response=await this.fetcher(url,{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},
+        body:JSON.stringify(body),...(combined?{signal:combined}:{})});
     } catch (error) {
       if(signal?.aborted)throw new TelegramError('TELEGRAM_STOPPED');
-      if(timeoutSignal.aborted){detail(0,'none',0,'TIMEOUT');throw new TelegramError('TELEGRAM_NETWORK_OR_RESPONSE_ERROR',null,'REQUEST_TIMEOUT');}
+      if(timeoutSignal?.aborted){detail(0,'none',0,'TIMEOUT');throw new TelegramError('TELEGRAM_NETWORK_OR_RESPONSE_ERROR',null,'REQUEST_TIMEOUT');}
       const code=(error as {cause?:{code?:unknown};code?:unknown})?.cause?.code??(error as {code?:unknown})?.code;
       const reason=typeof code==='string'?({ENOTFOUND:'DNS_FAILED',EAI_AGAIN:'DNS_TEMPORARY_FAILURE',ECONNRESET:'CONNECTION_RESET',
         ECONNREFUSED:'CONNECTION_REFUSED',UND_ERR_CONNECT_TIMEOUT:'CONNECT_TIMEOUT',UND_ERR_SOCKET:'SOCKET_CLOSED'} as Record<string,string>)[code]:'NETWORK_FAILED';
@@ -48,22 +50,23 @@ export class TelegramApi implements TelegramPolling {
     const contentType=/application\/(?:[a-z0-9.+-]*\+)?json\b/.test(rawType)?'json':rawType.startsWith('text/html')?'html':rawType?'other':'none';
     const declared=Number(response.headers.get('content-length')??0);
     if(Number.isFinite(declared)&&declared>2_000_000){await response.body?.cancel().catch(()=>{});detail(status,contentType,declared,'RESPONSE_TOO_LARGE');throw new TelegramError('TELEGRAM_RESPONSE_INVALID',null,'RESPONSE_TOO_LARGE');}
-    let bytes:Uint8Array;
-    try{bytes=new Uint8Array(await response.arrayBuffer());}
+    let text:string;
+    try{text=await response.text();}
     catch{detail(status,contentType,0,'RESPONSE_BODY_READ_FAILED');throw new TelegramError('TELEGRAM_NETWORK_OR_RESPONSE_ERROR',null,'RESPONSE_BODY_READ_FAILED');}
-    if(bytes.byteLength>2_000_000){detail(status,contentType,bytes.byteLength,'RESPONSE_TOO_LARGE');throw new TelegramError('TELEGRAM_RESPONSE_INVALID',null,'RESPONSE_TOO_LARGE');}
+    const bytes=new TextEncoder().encode(text).byteLength;
+    if(bytes>2_000_000){detail(status,contentType,bytes,'RESPONSE_TOO_LARGE');throw new TelegramError('TELEGRAM_RESPONSE_INVALID',null,'RESPONSE_TOO_LARGE');}
     let json:unknown;
-    try{json=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));}
-    catch{detail(status,contentType,bytes.byteLength,'NON_JSON_HTTP_RESPONSE');throw new TelegramError(status>=400?`TELEGRAM_HTTP_${status}`:'TELEGRAM_RESPONSE_INVALID',null,status>=400?telegramReason(null,status):'NON_JSON_HTTP_RESPONSE');}
+    try{json=JSON.parse(text);}
+    catch{detail(status,contentType,bytes,'NON_JSON_HTTP_RESPONSE');throw new TelegramError(status>=400?`TELEGRAM_HTTP_${status}`:'TELEGRAM_RESPONSE_INVALID',null,status>=400?telegramReason(null,status):'NON_JSON_HTTP_RESPONSE');}
     const errorEnvelope=z.object({ok:z.literal(false),error_code:z.number().int().min(100).max(599),description:z.string().optional(),
       parameters:z.object({retry_after:z.number().int().nonnegative().max(86400).optional()}).optional()}).safeParse(json);
     const successEnvelope=z.object({ok:z.literal(true),result:z.unknown()}).safeParse(json);
-    if(!errorEnvelope.success&&!successEnvelope.success){detail(status,contentType,bytes.byteLength,'TELEGRAM_ENVELOPE_INVALID');throw new TelegramError('TELEGRAM_RESPONSE_INVALID',null,'TELEGRAM_ENVELOPE_INVALID');}
+    if(!errorEnvelope.success&&!successEnvelope.success){detail(status,contentType,bytes,'TELEGRAM_ENVELOPE_INVALID');throw new TelegramError('TELEGRAM_RESPONSE_INVALID',null,'TELEGRAM_ENVELOPE_INVALID');}
     if(errorEnvelope.success){const envelope=errorEnvelope.data,retryMs=envelope.parameters?.retry_after===undefined?null:envelope.parameters.retry_after*1000;
-      detail(status,contentType,bytes.byteLength,'TELEGRAM_REJECTED');
+      detail(status,contentType,bytes,'TELEGRAM_REJECTED');
       throw new TelegramError(status>=400?`TELEGRAM_HTTP_${status}`:`TELEGRAM_API_${envelope.error_code}`,retryMs,telegramReason(envelope.description,status>=400?status:envelope.error_code));}
-    if(status>=400){detail(status,contentType,bytes.byteLength,'HTTP_STATUS_WITH_SUCCESS_ENVELOPE');throw new TelegramError(`TELEGRAM_HTTP_${status}`,null,telegramReason(null,status));}
-    if(successEnvelope.success){detail(status,contentType,bytes.byteLength,'TELEGRAM_SUCCESS');return successEnvelope.data.result;}
+    if(status>=400){detail(status,contentType,bytes,'HTTP_STATUS_WITH_SUCCESS_ENVELOPE');throw new TelegramError(`TELEGRAM_HTTP_${status}`,null,telegramReason(null,status));}
+    if(successEnvelope.success){detail(status,contentType,bytes,'TELEGRAM_SUCCESS');return successEnvelope.data.result;}
     // Kept explicit for exhaustive control-flow analysis across Zod versions.
     throw new TelegramError('TELEGRAM_RESPONSE_INVALID',null,'TELEGRAM_ENVELOPE_INVALID');
   }
