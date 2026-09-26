@@ -3,6 +3,7 @@ import { productionReady,productionTick } from '../production/runtime.js';
 import { neonDatabase } from '../db/neon.js';
 import { enqueueUpdate } from '../production/inbox.js';
 import { telegramUpdateSchema,type TelegramUpdate } from '../adapters/telegram/types.js';
+import { telegramEgress } from '../production/telegram-egress.js';
 
 async function secretMatches(actual:string|null,expected:string|undefined) {
   if(!actual||!expected||!/^[A-Za-z0-9_-]{32,256}$/.test(expected))return false;
@@ -24,7 +25,7 @@ async function readUpdate(request:Request):Promise<TelegramUpdate> {
 }
 // Dependency injection keeps every normal Worker test offline.
 export function createWorker(deps={
-  ready:productionReady,tick:productionTick,
+  ready:productionReady,tick:productionTick,egress:telegramEgress,
   enqueue:async(config:ReturnType<typeof productionConfig>,userId:string,update:TelegramUpdate)=>{
     const connection=neonDatabase(config.runtimeUrl,'news_runtime');
     try{await enqueueUpdate(connection.db,userId,config.telegram.botId,update);}finally{await connection.close();}
@@ -37,6 +38,13 @@ export function createWorker(deps={
       if(request.method==='GET'&&path==='/ready') {
         if(!await secretMatches(request.headers.get('Authorization')?.replace(/^Bearer /,'')??null,env.PRODUCTION_HEALTH_SECRET))return new Response(null,{status:403});
         try{await deps.ready(env);return Response.json({status:'ready'});}catch{console.error('PRODUCTION_READINESS_FAILED');return Response.json({status:'not_ready'},{status:503});}
+      }
+      if(path==='/diagnostics/telegram-egress') {
+        if(request.method!=='POST')return new Response(null,{status:405});
+        if(!await secretMatches(request.headers.get('Authorization')?.replace(/^Bearer /,'')??null,env.PRODUCTION_HEALTH_SECRET))return new Response(null,{status:403});
+        const result=await deps.egress(env.TELEGRAM_BOT_TOKEN??'');
+        console.log(`FETCH_HANDLER_EGRESS = ${result.reached?'PASS':'FAIL'} category=${result.category}`);
+        return Response.json(result);
       }
       if(path!=='/telegram/webhook')return new Response(null,{status:404});
       if(request.method!=='POST')return new Response(null,{status:405});
@@ -51,6 +59,11 @@ export function createWorker(deps={
       }catch{console.error('PRODUCTION_WEBHOOK_PERSIST_FAILED');return new Response(null,{status:503});}
     },
     async scheduled(event:{scheduledTime:number},env:ProductionEnv):Promise<void> {
+      if(env.TELEGRAM_EGRESS_DIAGNOSTIC==='YES') {
+        const result=await deps.egress(env.TELEGRAM_BOT_TOKEN??'');
+        console.log(`SCHEDULED_HANDLER_EGRESS = ${result.reached?'PASS':'FAIL'} status=${result.status} content_type=${result.contentType} bytes=${result.bytes} category=${result.category}`);
+        return;
+      }
       try{await deps.tick(env,new Date(event.scheduledTime));}
       catch{console.error('PRODUCTION_TICK_FAILED');throw Error('PRODUCTION_TICK_FAILED');}
     },
