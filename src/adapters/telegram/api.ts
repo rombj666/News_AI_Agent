@@ -4,6 +4,8 @@ import { TelegramError, type TelegramMessage, type TelegramPolling } from './typ
 import { safeImageUrl } from '../../retrieval/images.js';
 import { telegramReason,safeFailure } from './diagnostics.js';
 
+const defaultFetcher:Fetcher=(url,init)=>globalThis.fetch(url,init);
+
 export function abortableDelay(ms:number,signal:AbortSignal):Promise<void> {
   return new Promise((resolve,reject)=>{
     if(signal.aborted) {reject(new TelegramError('TELEGRAM_STOPPED'));return;}
@@ -16,7 +18,7 @@ export class TelegramApi implements TelegramPolling {
   readonly #token:string;
   #lastSend=0;
   #sendQueue:Promise<unknown>=Promise.resolve();
-  constructor(token:string,private readonly fetcher:Fetcher=fetch,private readonly spacingMs=1100,private readonly log:(code:string)=>void=()=>{}) {
+  constructor(token:string,private readonly fetcher:Fetcher=defaultFetcher,private readonly spacingMs=1100,private readonly log:(code:string)=>void=()=>{}) {
     if(!/^[1-9]\d{0,15}:[A-Za-z0-9_-]{20,200}$/.test(token)) throw new TelegramError('TELEGRAM_TOKEN_INVALID');
     this.#token=token;
   }
@@ -31,11 +33,21 @@ export class TelegramApi implements TelegramPolling {
     const combined=method==='getUpdates'?(signal?AbortSignal.any([signal,timeoutSignal!]):timeoutSignal!):undefined;
     const detail=(status:number,contentType:string,bytes:number,category:string)=>
       this.log(`TELEGRAM_HTTP_DIAGNOSTIC: method=${method} status=${status} content_type=${contentType} bytes=${bytes} category=${category}`);
+    const url=`https://api.telegram.org/bot${this.#token}/${method}`;
+    let requestBody:string;
+    try{requestBody=JSON.stringify(body);}
+    catch{
+      detail(0,'none',0,'REQUEST_SERIALIZATION_FAILED');
+      throw new TelegramError('TELEGRAM_REQUEST_INVALID',null,'REQUEST_SERIALIZATION_FAILED');
+    }
+    const init:RequestInit={method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},
+      body:requestBody,...(combined?{signal:combined}:{})};
     let response:Response;
     try {
-      const url = `https://api.telegram.org/bot${this.#token}/${method}`;
-      response=await this.fetcher(url,{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},
-        body:JSON.stringify(body),...(combined?{signal:combined}:{})});
+      // Copying the function prevents a receiver-sensitive host fetch from being
+      // invoked with TelegramApi as `this`.
+      const fetcher=this.fetcher;
+      response=await fetcher(url,init);
     } catch (error) {
       if(signal?.aborted)throw new TelegramError('TELEGRAM_STOPPED');
       if(timeoutSignal?.aborted){detail(0,'none',0,'TIMEOUT');throw new TelegramError('TELEGRAM_NETWORK_OR_RESPONSE_ERROR',null,'REQUEST_TIMEOUT');}

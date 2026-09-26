@@ -11,6 +11,9 @@ import { schedulingConfig } from '../scheduling/config.js';
 import { runScheduledPipeline } from '../scheduling/pipeline.js';
 import type { CollectionSource } from '../scheduling/collection.js';
 import { drainInbox } from './inbox.js';
+import type { Fetcher } from '../retrieval/http.js';
+
+const workerFetch:Fetcher=(url,init)=>globalThis.fetch(url,init);
 export function productionDatabases(config:ReturnType<typeof productionConfig>) {
   const runtime=neonDatabase(config.runtimeUrl,'news_runtime'),collector=neonDatabase(config.collectorUrl,'news_collector'),quality=neonDatabase(config.qualityUrl,'news_quality');
   return {runtime:runtime.db,collector:collector.db,quality:quality.db,
@@ -33,7 +36,7 @@ export async function productionReady(env:ProductionEnv) {
 export async function processInteractiveInbox(env:ProductionEnv,userIds?:readonly string[]) {
   const config=productionConfig(env),connection=neonDatabase(config.runtimeUrl,'news_runtime');
   try {
-    const transport=new TelegramApi(config.telegram.token,fetch,1100,console.log);
+    const transport=new TelegramApi(config.telegram.token,workerFetch,1100,console.log);
     const model=config.telegram.aiEnabled?new OpenAIResponses(env):null;
     const router=createTelegramRouter({db:connection.db,botId:config.telegram.botId,identities:config.identities,transport,
       ai:model?{model,limits:config.telegram.limits!}:null,log:console.log});
@@ -52,7 +55,7 @@ export async function productionTick(env:ProductionEnv,now=new Date()) {
   if(!config.schedule)return;
   const db=productionDatabases(config);
   try {
-    const transport=new TelegramApi(config.telegram.token,fetch,1100,console.log);
+    const transport=new TelegramApi(config.telegram.token,workerFetch,1100,console.log);
     const model=new OpenAIResponses(env);
     const schedule=schedulingConfig({...env,RUN_LIVE_SCHEDULED_PIPELINE:'YES'});
     const sources:CollectionSource[]=config.sources.map(source=>({retriever:new RssRetriever(source),request:{source,category:source.category,limit:30}}));

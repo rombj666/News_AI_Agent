@@ -13,6 +13,7 @@ import { generateDigest } from '../src/digest/service.js';
 import { DIGEST_NOW as now,DIGEST_START,DIGEST_END,digestTestLimits as limits,digestFixtureModel,seedDigestRankings } from './fixtures/digest.js';
 import { asUser } from '../src/db/database.js';
 import type { Digest } from '../src/digest/types.js';
+import type { TelegramMessage } from '../src/adapters/telegram/types.js';
 import { readPreferences,proposePreferences,decideProposal } from '../src/services/preferences.js';
 
 const token='123456:abcdefghijklmnopqrstuvwxyz0123456789';
@@ -58,6 +59,24 @@ test('Telegram transport accepts Cloudflare-style JSON content type and success 
   assert.equal(requestInit?.signal,undefined);assert.deepEqual(JSON.parse(String(requestInit?.body)),{
     chat_id:'12345',text:'hello',parse_mode:'HTML',link_preview_options:{is_disabled:true}});
   assert.match(logs.join('\n'),/method=sendMessage status=200 content_type=json bytes=\d+ category=TELEGRAM_SUCCESS/);
+});
+test('Telegram transport invokes a receiver-sensitive fetcher as a plain function',async()=>{
+  let receiver:unknown='not-called',calls=0;
+  async function receiverSensitive(this:unknown,_url:string,_init:RequestInit){
+    receiver=this;calls++;return Response.json({ok:true,result:{message_id:321}});
+  }
+  const api=new TelegramApi(token,receiverSensitive,0);
+  assert.equal(await api.sendMessage('12345',renderText('hello')[0]!),321);
+  assert.equal(receiver,undefined);assert.equal(calls,1);
+});
+test('request serialization failure is classified before fetch and never reported as a network failure',async()=>{
+  let calls=0;const logs:string[]=[];
+  const button:{text:string;callback_data:string;cycle?:unknown}={text:'Action',callback_data:'safe'};button.cycle=button;
+  const message:TelegramMessage={...renderText('private message')[0]!,buttons:[[button]]};
+  const api=new TelegramApi(token,async()=>{calls++;return Response.json({ok:true,result:{message_id:1}});},0,s=>logs.push(s));
+  await assert.rejects(()=>api.sendMessage('12345',message),e=>safeFailure(e)==='TELEGRAM_REQUEST_INVALID REQUEST_SERIALIZATION_FAILED');
+  assert.equal(calls,0);assert.match(logs.join('\n'),/category=REQUEST_SERIALIZATION_FAILED/);
+  assert.doesNotMatch(logs.join('\n'),/FETCH_NETWORK_FAILURE|private message/);
 });
 test('definite photo rejection falls back exactly once, with buttons preserved',async()=>{
   for(const status of [400,413,415,422]) {
