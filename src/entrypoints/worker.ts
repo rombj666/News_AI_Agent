@@ -1,8 +1,59 @@
-export default {
-  async fetch(request: Request): Promise<Response> {
-    if (request.method === 'GET' && new URL(request.url).pathname === '/health') {
-      return Response.json({ status: 'ok', service: 'news-ai-agent', stage: 'foundation', liveIntegrations: false });
-    }
-    return Response.json({ error: 'not_found' }, { status: 404 });
+import { productionConfig,type ProductionEnv } from '../production/config.js';
+import { productionReady,productionTick } from '../production/runtime.js';
+import { neonDatabase } from '../db/neon.js';
+import { enqueueUpdate } from '../production/inbox.js';
+import { telegramUpdateSchema,type TelegramUpdate } from '../adapters/telegram/types.js';
+
+async function secretMatches(actual:string|null,expected:string|undefined) {
+  if(!actual||!expected||!/^[A-Za-z0-9_-]{32,256}$/.test(expected))return false;
+  const hash=async(value:string)=>new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value)));
+  const [a,b]=await Promise.all([hash(actual),hash(expected)]);let different=0;
+  for(let i=0;i<a.length;i++)different|=a[i]!^b[i]!;
+  return different===0;
+}
+async function readUpdate(request:Request):Promise<TelegramUpdate> {
+  if(!request.headers.get('content-type')?.toLowerCase().startsWith('application/json'))throw Error('INVALID');
+  if(Number(request.headers.get('content-length')??0)>65536)throw Error('INVALID');
+  const reader=request.body?.getReader();if(!reader)throw Error('INVALID');
+  let length=0;const chunks:Uint8Array[]=[];
+  try{while(true){const {done,value}=await reader.read();if(done)break;length+=value.byteLength;
+    if(length>65536){await reader.cancel();throw Error('INVALID');}chunks.push(value);}}
+  finally{reader.releaseLock();}
+  const bytes=new Uint8Array(length);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.length;}
+  return telegramUpdateSchema.parse(JSON.parse(new TextDecoder().decode(bytes)));
+}
+// Dependency injection keeps every normal Worker test offline.
+export function createWorker(deps={
+  ready:productionReady,tick:productionTick,
+  enqueue:async(config:ReturnType<typeof productionConfig>,userId:string,update:TelegramUpdate)=>{
+    const connection=neonDatabase(config.runtimeUrl,'news_runtime');
+    try{await enqueueUpdate(connection.db,userId,config.telegram.botId,update);}finally{await connection.close();}
   },
-};
+}) {
+  return {
+    async fetch(request:Request,env:ProductionEnv={}):Promise<Response> {
+      const path=new URL(request.url).pathname;
+      if(request.method==='GET'&&path==='/health')return Response.json({status:'ok',service:'news-ai-agent',liveIntegrations:false});
+      if(request.method==='GET'&&path==='/ready') {
+        if(!await secretMatches(request.headers.get('Authorization')?.replace(/^Bearer /,'')??null,env.PRODUCTION_HEALTH_SECRET))return new Response(null,{status:403});
+        try{await deps.ready(env);return Response.json({status:'ready'});}catch{console.error('PRODUCTION_READINESS_FAILED');return Response.json({status:'not_ready'},{status:503});}
+      }
+      if(path!=='/telegram/webhook')return new Response(null,{status:404});
+      if(request.method!=='POST')return new Response(null,{status:405});
+      if(!await secretMatches(request.headers.get('X-Telegram-Bot-Api-Secret-Token'),env.TELEGRAM_WEBHOOK_SECRET))return new Response(null,{status:403});
+      let update:TelegramUpdate;
+      try{update=await readUpdate(request);}catch{return new Response(null,{status:400});}
+      try {
+        const config=productionConfig(env),callback=update.callback_query,message=callback?.message??update.message,sender=callback?.from??message?.from;
+        if(!sender||sender.is_bot||message?.chat.type!=='private'||message.chat.id!==sender.id)return new Response(null,{status:200});
+        const userId=config.identities.get(String(sender.id));if(!userId)return new Response(null,{status:200});
+        await deps.enqueue(config,userId,update);return new Response(null,{status:200});
+      }catch{console.error('PRODUCTION_WEBHOOK_PERSIST_FAILED');return new Response(null,{status:503});}
+    },
+    async scheduled(event:{scheduledTime:number},env:ProductionEnv):Promise<void> {
+      try{await deps.tick(env,new Date(event.scheduledTime));}
+      catch{console.error('PRODUCTION_TICK_FAILED');throw Error('PRODUCTION_TICK_FAILED');}
+    },
+  };
+}
+export default createWorker();

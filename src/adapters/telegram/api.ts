@@ -36,9 +36,12 @@ export class TelegramApi implements TelegramPolling {
         }
         httpStatus=raw.status;
         return raw.ok?raw:new Response(raw.body,{status:200,headers:raw.headers});
-      },`https://api.telegram.org/bot${this.#token}/${method}`,{
-        method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)},combined,2_000_000);
-      const envelope=z.object({ok:z.boolean(),result:z.unknown().optional(),error_code:z.number().int().optional(),description:z.string().optional(),
+        },`https://api.telegram.org/bot${this.#token}/${method}`,{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify(body)
+        },combined,2_000_000);      
+        const envelope=z.object({ok:z.boolean(),result:z.unknown().optional(),error_code:z.number().int().optional(),description:z.string().optional(),
         parameters:z.object({retry_after:z.number().int().nonnegative().max(86400).optional()}).optional()}).parse(JSON.parse(response.text));
       const retryMs=envelope.parameters?.retry_after===undefined?null:envelope.parameters.retry_after*1000;
       if(httpStatus>=400) throw new TelegramError(`TELEGRAM_HTTP_${httpStatus}`,retryMs,telegramReason(envelope.description,httpStatus));
@@ -118,3 +121,4 @@ export class TelegramApi implements TelegramPolling {
     return {reachable:true,webhookConfigured:!!webhook.url,pendingUpdates:webhook.pending_update_count};
   }
 }
+

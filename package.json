@@ -29,13 +29,17 @@
     "images:diagnose": "node --env-file-if-exists=.env --import tsx scripts/images-diagnose.ts"
   },
   "dependencies": {
+    "@neondatabase/serverless": "1.1.0",
     "fast-xml-parser": "5.11.1",
+    "ws": "8.21.3",
     "zod": "4.6.5"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.8",
     "@types/node": "22.20.3",
+    "@types/ws": "8.18.1",
     "tsx": "4.23.13",
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "wrangler": "4.141.0"
   }
 }
