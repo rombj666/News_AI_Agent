@@ -33,6 +33,32 @@ test('text error diagnostics retain a useful reason but no token or response bod
   assert.match(logs.join('\n'),/TELEGRAM_SEND_MESSAGE_FAILED: TELEGRAM_HTTP_400 HTML_INVALID/);
   assert.ok(!logs.join('').includes('SECRET_RESPONSE'));assert.ok(!logs.join('').includes(token));
 });
+test('Telegram transport classifies Worker response failures without leaking body, URL, token or message',async()=>{
+  const cases=[
+    {name:'network',fetcher:async()=>{throw new TypeError('secret fetch detail');},reason:'NETWORK_FAILED',category:'FETCH_NETWORK_FAILURE'},
+    {name:'non-json',fetcher:async()=>new Response('<html>secret proxy page</html>',{status:200,headers:{'content-type':'text/html'}}),reason:'NON_JSON_HTTP_RESPONSE',category:'NON_JSON_HTTP_RESPONSE'},
+    {name:'envelope',fetcher:async()=>Response.json({ok:'yes',secret:'provider body'}),reason:'TELEGRAM_ENVELOPE_INVALID',category:'TELEGRAM_ENVELOPE_INVALID'},
+    {name:'rejection',fetcher:async()=>Response.json({ok:false,error_code:400,description:'secret rejection'},{status:400}),reason:'TELEGRAM_REQUEST_REJECTED',category:'TELEGRAM_REJECTED'},
+    {name:'result',fetcher:async()=>Response.json({ok:true,result:{date:123,secret:'provider body'}}),reason:'RESPONSE_MESSAGE_ID_INVALID',category:'RESULT_SHAPE_INVALID'},
+  ] as const;
+  for(const item of cases){
+    const logs:string[]=[],api=new TelegramApi(token,item.fetcher,0,s=>logs.push(s));
+    await assert.rejects(()=>api.sendMessage('12345',renderText('private message')[0]!),e=>safeFailure(e).includes(item.reason));
+    const output=logs.join('\n');assert.match(output,new RegExp(item.category));
+    for(const forbidden of [token,'api.telegram.org','private message','secret','<html>'])assert.ok(!output.includes(forbidden),`${item.name} leaked ${forbidden}`);
+  }
+});
+test('Telegram transport accepts Cloudflare-style JSON content type and success envelope',async()=>{
+  const logs:string[]=[];let requestUrl='',requestInit:RequestInit|undefined;
+  const api=new TelegramApi(token,async(url,init)=>{requestUrl=url;requestInit=init;return new Response(JSON.stringify({ok:true,result:{message_id:987,date:1,chat:{id:12345,type:'private'},text:'hello'}}),
+    {status:200,headers:{'content-type':'application/json; charset=utf-8'}});},0,s=>logs.push(s));
+  assert.equal(await api.sendMessage('12345',renderText('hello')[0]!),987);
+  assert.equal(requestUrl,`https://api.telegram.org/bot${token}/sendMessage`);
+  assert.equal(requestInit?.method,'POST');assert.equal((requestInit?.headers as Record<string,string>)['content-type'],'application/json');
+  assert.ok(requestInit?.signal instanceof AbortSignal);assert.deepEqual(JSON.parse(String(requestInit?.body)),{
+    chat_id:'12345',text:'hello',parse_mode:'HTML',link_preview_options:{is_disabled:true}});
+  assert.match(logs.join('\n'),/method=sendMessage status=200 content_type=json bytes=\d+ category=TELEGRAM_SUCCESS/);
+});
 test('definite photo rejection falls back exactly once, with buttons preserved',async()=>{
   for(const status of [400,413,415,422]) {
     const calls:{method:string;body:Record<string,unknown>}[]=[];

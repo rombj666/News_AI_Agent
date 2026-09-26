@@ -25,157 +25,47 @@ export class TelegramApi implements TelegramPolling {
     body:unknown,
     signal?:AbortSignal,
   ):Promise<unknown> {
-    const combined = AbortSignal.any([
-      signal ?? new AbortController().signal,
-      AbortSignal.timeout(method === 'getUpdates' ? 35000 : 15000),
-    ]);
-
-    let httpStatus = 0;
-    let networkReason:string|null = null;
-
+    const timeoutSignal=AbortSignal.timeout(method==='getUpdates'?35000:15000);
+    const combined=signal?AbortSignal.any([signal,timeoutSignal]):timeoutSignal;
+    const detail=(status:number,contentType:string,bytes:number,category:string)=>
+      this.log(`TELEGRAM_HTTP_DIAGNOSTIC: method=${method} status=${status} content_type=${contentType} bytes=${bytes} category=${category}`);
+    let response:Response;
     try {
       const url = `https://api.telegram.org/bot${this.#token}/${method}`;
-
-      let response:Response;
-
-      try {
-        response = await this.fetcher(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json;charset=UTF-8',
-            'Accept': 'application/json',
-          },
-          body: JSON.stringify(body),
-          signal: combined,
-        });
-      } catch (error) {
-        const code =
-          (error as {cause?:{code?:unknown};code?:unknown})?.cause?.code ??
-          (error as {code?:unknown})?.code;
-
-        const message = error instanceof Error ? error.message : '';
-
-        if (typeof code === 'string') {
-          networkReason = ({
-            ENOTFOUND: 'DNS_FAILED',
-            EAI_AGAIN: 'DNS_TEMPORARY_FAILURE',
-            ECONNRESET: 'CONNECTION_RESET',
-            ECONNREFUSED: 'CONNECTION_REFUSED',
-            UND_ERR_CONNECT_TIMEOUT: 'CONNECT_TIMEOUT',
-            UND_ERR_SOCKET: 'SOCKET_CLOSED',
-          } as Record<string,string>)[code] ?? null;
-        }
-
-        if (!networkReason && /network connection lost/i.test(message)) {
-          networkReason = 'NETWORK_CONNECTION_LOST';
-        }
-
-        if (!networkReason && /fetch failed/i.test(message)) {
-          networkReason = 'FETCH_FAILED';
-        }
-
-        throw error;
-      }
-
-      httpStatus = response.status;
-
-      const declaredLength = Number(
-        response.headers.get('content-length') ?? 0
-      );
-
-      if (
-        Number.isFinite(declaredLength) &&
-        declaredLength > 2_000_000
-      ) {
-        await response.body?.cancel().catch(() => undefined);
-        throw new TelegramError(
-          'TELEGRAM_RESPONSE_INVALID',
-          null,
-          'RESPONSE_TOO_LARGE',
-        );
-      }
-
-      const text = await response.text();
-
-      if (new TextEncoder().encode(text).length > 2_000_000) {
-        throw new TelegramError(
-          'TELEGRAM_RESPONSE_INVALID',
-          null,
-          'RESPONSE_TOO_LARGE',
-        );
-      }
-
-      let json:unknown;
-
-      try {
-        json = JSON.parse(text);
-      } catch {
-        throw new TelegramError(
-          'TELEGRAM_RESPONSE_INVALID',
-          null,
-          'RESPONSE_INVALID',
-        );
-      }
-
-      const envelope = z.object({
-        ok: z.boolean(),
-        result: z.unknown().optional(),
-        error_code: z.number().int().optional(),
-        description: z.string().optional(),
-        parameters: z.object({
-          retry_after: z.number().int().nonnegative().max(86400).optional(),
-        }).optional(),
-      }).parse(json);
-
-      const retryMs =
-        envelope.parameters?.retry_after === undefined
-          ? null
-          : envelope.parameters.retry_after * 1000;
-
-      if (httpStatus >= 400) {
-        throw new TelegramError(
-          `TELEGRAM_HTTP_${httpStatus}`,
-          retryMs,
-          telegramReason(envelope.description, httpStatus),
-        );
-      }
-
-      if (!envelope.ok) {
-        throw new TelegramError(
-          `TELEGRAM_API_${envelope.error_code ?? 0}`,
-          retryMs,
-          telegramReason(
-            envelope.description,
-            envelope.error_code ?? 0,
-          ),
-        );
-      }
-
-      return envelope.result;
-
+      response=await this.fetcher(url,{method:'POST',headers:{'content-type':'application/json','accept':'application/json'},
+        body:JSON.stringify(body),signal:combined,redirect:'error'});
     } catch (error) {
-      if (error instanceof TelegramError) {
-        throw error;
-      }
-
-      if (httpStatus >= 400) {
-        throw new TelegramError(
-          `TELEGRAM_HTTP_${httpStatus}`,
-          null,
-          telegramReason(null, httpStatus),
-        );
-      }
-
-      throw new TelegramError(
-        signal?.aborted
-          ? 'TELEGRAM_STOPPED'
-          : 'TELEGRAM_NETWORK_OR_RESPONSE_ERROR',
-        null,
-        combined.aborted
-          ? 'REQUEST_TIMEOUT'
-          : networkReason ?? 'RESPONSE_INVALID',
-      );
+      if(signal?.aborted)throw new TelegramError('TELEGRAM_STOPPED');
+      if(timeoutSignal.aborted){detail(0,'none',0,'TIMEOUT');throw new TelegramError('TELEGRAM_NETWORK_OR_RESPONSE_ERROR',null,'REQUEST_TIMEOUT');}
+      const code=(error as {cause?:{code?:unknown};code?:unknown})?.cause?.code??(error as {code?:unknown})?.code;
+      const reason=typeof code==='string'?({ENOTFOUND:'DNS_FAILED',EAI_AGAIN:'DNS_TEMPORARY_FAILURE',ECONNRESET:'CONNECTION_RESET',
+        ECONNREFUSED:'CONNECTION_REFUSED',UND_ERR_CONNECT_TIMEOUT:'CONNECT_TIMEOUT',UND_ERR_SOCKET:'SOCKET_CLOSED'} as Record<string,string>)[code]:'NETWORK_FAILED';
+      detail(0,'none',0,'FETCH_NETWORK_FAILURE');
+      throw new TelegramError('TELEGRAM_NETWORK_OR_RESPONSE_ERROR',null,reason??'NETWORK_FAILED');
     }
+    const status=response.status;
+    const rawType=(response.headers.get('content-type')??'').toLowerCase();
+    const contentType=/application\/(?:[a-z0-9.+-]*\+)?json\b/.test(rawType)?'json':rawType.startsWith('text/html')?'html':rawType?'other':'none';
+    const declared=Number(response.headers.get('content-length')??0);
+    if(Number.isFinite(declared)&&declared>2_000_000){await response.body?.cancel().catch(()=>{});detail(status,contentType,declared,'RESPONSE_TOO_LARGE');throw new TelegramError('TELEGRAM_RESPONSE_INVALID',null,'RESPONSE_TOO_LARGE');}
+    let bytes:Uint8Array;
+    try{bytes=new Uint8Array(await response.arrayBuffer());}
+    catch{detail(status,contentType,0,'RESPONSE_BODY_READ_FAILED');throw new TelegramError('TELEGRAM_NETWORK_OR_RESPONSE_ERROR',null,'RESPONSE_BODY_READ_FAILED');}
+    if(bytes.byteLength>2_000_000){detail(status,contentType,bytes.byteLength,'RESPONSE_TOO_LARGE');throw new TelegramError('TELEGRAM_RESPONSE_INVALID',null,'RESPONSE_TOO_LARGE');}
+    let json:unknown;
+    try{json=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));}
+    catch{detail(status,contentType,bytes.byteLength,'NON_JSON_HTTP_RESPONSE');throw new TelegramError(status>=400?`TELEGRAM_HTTP_${status}`:'TELEGRAM_RESPONSE_INVALID',null,status>=400?telegramReason(null,status):'NON_JSON_HTTP_RESPONSE');}
+    const errorEnvelope=z.object({ok:z.literal(false),error_code:z.number().int().min(100).max(599),description:z.string().optional(),
+      parameters:z.object({retry_after:z.number().int().nonnegative().max(86400).optional()}).optional()}).safeParse(json);
+    const successEnvelope=z.object({ok:z.literal(true),result:z.unknown()}).safeParse(json);
+    if(!errorEnvelope.success&&!successEnvelope.success){detail(status,contentType,bytes.byteLength,'TELEGRAM_ENVELOPE_INVALID');throw new TelegramError('TELEGRAM_RESPONSE_INVALID',null,'TELEGRAM_ENVELOPE_INVALID');}
+    if(errorEnvelope.success){const envelope=errorEnvelope.data,retryMs=envelope.parameters?.retry_after===undefined?null:envelope.parameters.retry_after*1000;
+      detail(status,contentType,bytes.byteLength,'TELEGRAM_REJECTED');
+      throw new TelegramError(status>=400?`TELEGRAM_HTTP_${status}`:`TELEGRAM_API_${envelope.error_code}`,retryMs,telegramReason(envelope.description,status>=400?status:envelope.error_code));}
+    if(status>=400){detail(status,contentType,bytes.byteLength,'HTTP_STATUS_WITH_SUCCESS_ENVELOPE');throw new TelegramError(`TELEGRAM_HTTP_${status}`,null,telegramReason(null,status));}
+    if(successEnvelope.success){detail(status,contentType,bytes.byteLength,'TELEGRAM_SUCCESS');return successEnvelope.data.result;}
+    // Kept explicit for exhaustive control-flow analysis across Zod versions.
+    throw new TelegramError('TELEGRAM_RESPONSE_INVALID',null,'TELEGRAM_ENVELOPE_INVALID');
   }
   async getUpdates(offset:number,signal:AbortSignal):Promise<unknown[]> {
     if(!Number.isSafeInteger(offset)||offset<0) throw new TelegramError('TELEGRAM_OFFSET_INVALID');
@@ -212,7 +102,7 @@ export class TelegramApi implements TelegramPolling {
         const photo=await this.call('sendPhoto',{chat_id:chatId,photo:message.imageUrl,caption:message.html,parse_mode:'HTML',
           ...(message.buttons?{reply_markup:{inline_keyboard:message.buttons}}:{})},signal);
         const parsed=z.object({message_id:z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)}).safeParse(photo);
-        if(!parsed.success)throw new TelegramError('TELEGRAM_SEND_UNCERTAIN');
+        if(!parsed.success){this.log('TELEGRAM_RESULT_DIAGNOSTIC: method=sendPhoto category=RESULT_SHAPE_INVALID');throw new TelegramError('TELEGRAM_SEND_UNCERTAIN',null,'RESPONSE_MESSAGE_ID_INVALID');}
         return parsed.data.message_id;
       }catch(error){
         this.log(`TELEGRAM_SEND_PHOTO_FAILED: ${safeFailure(error)}`);
@@ -226,7 +116,7 @@ export class TelegramApi implements TelegramPolling {
       const result=await this.call('sendMessage',{chat_id:chatId,text:message.html,parse_mode:'HTML',link_preview_options:{is_disabled:true},
         ...(message.buttons?{reply_markup:{inline_keyboard:message.buttons}}:{})},signal);
       const parsed=z.object({message_id:z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)}).safeParse(result);
-      if(!parsed.success) throw new TelegramError('TELEGRAM_SEND_UNCERTAIN',null,'RESPONSE_MESSAGE_ID_INVALID');
+      if(!parsed.success){this.log('TELEGRAM_RESULT_DIAGNOSTIC: method=sendMessage category=RESULT_SHAPE_INVALID');throw new TelegramError('TELEGRAM_SEND_UNCERTAIN',null,'RESPONSE_MESSAGE_ID_INVALID');}
       return parsed.data.message_id;
     }catch(error){this.log(`TELEGRAM_SEND_MESSAGE_FAILED: ${safeFailure(error)}`);throw error;}
   }
@@ -243,4 +133,3 @@ export class TelegramApi implements TelegramPolling {
     return {reachable:true,webhookConfigured:!!webhook.url,pendingUpdates:webhook.pending_update_count};
   }
 }
-
