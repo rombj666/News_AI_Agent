@@ -46,6 +46,7 @@ export async function persistArticle(tx: Queryable, article: NormalizedArticle):
         AND date_kind<>'published' THEN 'published' ELSE date_kind END
       WHERE id=$1`, [id,article.fetchedAt,article.description,article.publishedAt,article.dateKind]);
   }
+  if(article.imageUrl) await tx.query('UPDATE articles SET image_url=$2 WHERE id=$1 AND image_url IS NULL',[id,article.imageUrl]);
   await tx.query('INSERT INTO article_urls(canonical_url, article_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [article.canonicalUrl, id]);
   return { id, duplicate };
 }

@@ -3,6 +3,7 @@ import type { Clock, NewsCandidate, NewsRetriever, RetrievalBatch, RetrievalRequ
 import { systemClock } from '../domain/ports.js';
 import { fetchText, RetrievalError, type Fetcher } from './http.js';
 import { parseDate } from './normalize.js';
+import { safeImageUrl } from './images.js';
 import { rssSourceSchema, type RssSource } from './sources.js';
 
 const object = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -53,7 +54,12 @@ export class RssRetriever implements NewsRetriever {
       // Atom updated is a modification time, not a publication time.
       const rawDate = atom ? item.published : item.pubDate ?? item.date;
       const publishedAt = parseDate(rawDate);
-      items.push({ url, title, source: this.source.name, publishedAt, fetchedAt,
+      const media=[...list(item.content),...list(object(item.group).content),...list(item.enclosure),...list(item.link)];
+      const declaredImages=media.map(object).filter(m=>m['@_medium']==='image'||/^image\/(jpeg|png)$/i.test(String(m['@_type']??''))||/\.(jpe?g|png)(?:\?|$)/i.test(String(m['@_url']??m['@_href']??'')));
+      // Media RSS thumbnails are explicitly images, including extensionless URLs.
+      const imageUrl=[...declaredImages,...list(item.thumbnail).map(object),...list(object(item.group).thumbnail).map(object)]
+        .map(m=>safeImageUrl(m['@_url']??m['@_href'])).find(Boolean)??null;
+      items.push({ url, title, source: this.source.name, publishedAt, fetchedAt,imageUrl,
         excerpt: text(atom ? item.summary ?? item.content : item.description ?? item.encoded),
         contentKind: 'feed_excerpt', dateKind: publishedAt ? 'published' : 'unknown',
         rawMetadata: { guid: text(item.guid ?? item.id), published: text(rawDate), updated: text(item.updated), category: item.category ?? null },

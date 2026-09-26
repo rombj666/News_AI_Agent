@@ -22,12 +22,13 @@ export function readPreferences(db: Database, userId: string) {
 }
 
 export async function proposePreferences(
-  db: Database, userId: string, proposed: unknown, clock: Clock = systemClock,
+  db: Database, userId: string, proposed: unknown, clock: Clock = systemClock, expectedVersion?: number,
 ) {
   const validated = preferencesSchema.parse(proposed);
   const now = clock.now();
   return asUser(db, userId, async (tx) => {
     const current = await profile(tx, userId, true);
+    if (expectedVersion !== undefined && current.version !== expectedVersion) throw new DomainError('STALE');
     const { rows } = await tx.query<ProposalRow>(
       `INSERT INTO pending_preference_changes
         (user_id, old_value, new_value, expected_version, created_at, expires_at)

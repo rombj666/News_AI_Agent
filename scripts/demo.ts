@@ -33,7 +33,7 @@ try {
   });
   const summary = await userUsageSummary(db.runtime, alice, new Date('2026-09-01'), new Date('2026-10-01'));
   console.log('Synthetic cost estimate (not actual spend):', formatUsd(summary[0]!.knownCostNanodollars));
-  console.log('Foundation demo completed. Retrieval has a separate explicit live-test command; Telegram delivery is not implemented.');
+console.log('Foundation demo completed. Live retrieval and Telegram use separate explicit commands.');
 } finally {
   await db.close();
 }

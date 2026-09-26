@@ -11,6 +11,11 @@ The user assigned Milestone 3 to deterministic article quality, freshness and st
 
 ## 1. Purpose and scope
 
+Milestone 7 revision: the user assigned scheduled daily pipeline and Telegram
+delivery with local validation first. Production Cloudflare/Neon/webhook work is
+explicitly deferred. Current implementation contract is docs/SCHEDULING.md; the
+original milestone table below remains historical planning context.
+
 Build a personal news assistant that finds relevant worldwide, regional, and topic-specific news, selects what matters to the user, and delivers an understandable briefing each morning or at a configured time. Users can discuss stories, request fresh searches, and refine structured preferences through Telegram.
 
 Develop and test locally first, then deploy to Cloudflare with Neon PostgreSQL. Start with one personal user, but preserve user isolation and shared collection so a later paid multi-user service does not require a backend rewrite.

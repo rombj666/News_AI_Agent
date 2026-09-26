@@ -1,5 +1,13 @@
 # Cost tracking
 
+Milestone 7: scheduled ranking and digest each enforce their configured monthly
+job-type budget, including manual usage of that type. Telegram explanation and
+preference interpretation use a separate conversation pool. All use the existing
+atomic reservation/settlement service and `ai_usage`; shared Brave collection
+retains account-wide budget/request limits. Default metering still supports the
+conservative all-usage scope used by earlier commands. Unknown charges remain
+reserved; no scheduler retry bypasses accounting. See [scheduling](SCHEDULING.md).
+
 Every provider attempt has a stable operation ID and attempt number; retries use new attempts. Duplicate ledger writes for the same attempt are ignored. Store provider/model/job type, user/shared scope, request ID, status, input/cached/output tokens or search calls, rate snapshot, cost, duration, and timestamp. No prompt bodies or secrets in the ledger.
 
 Use integer nanodollars to avoid floating-point accumulation. Cached input is a subset of input; price uncached and cached separately. Reject invalid token counts. Unknown usage produces unknown cost, and totals expose an unknown count. Shared collection spend is not charged once per user. Provider credits and invoices remain distinct from gross estimates.

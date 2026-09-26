@@ -1,5 +1,11 @@
 # Architecture
 
+Milestone 7 adds one local [scheduled pipeline](SCHEDULING.md): shared collection
+batch -> existing quality -> existing metered ranking -> saved digest -> existing
+Telegram renderer/adapter. A persisted user/date/type claim precedes external
+work. Confirmed preferences remain the delivery-settings authority. Production
+scheduling/deployment is deferred.
+
 Specification sections 1–3 and 9 are authoritative. Local code uses TypeScript with dependency injection; runtime-neutral services depend on typed ports. Node is the development runtime, Workers/Cron the later production runtime, and Neon PostgreSQL the persistent state authority.
 
 ```text

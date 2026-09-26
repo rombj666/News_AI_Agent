@@ -1,5 +1,6 @@
 import type { NewsCandidate } from '../domain/ports.js';
 import { publicHttpsUrl } from './http.js';
+import { safeImageUrl } from './images.js';
 
 export function plainText(value: string): string {
   return value.replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, ' ')
@@ -56,6 +57,7 @@ export function parseDate(value: unknown): string | null {
 }
 
 export interface NormalizedArticle {
+  imageUrl?: string | null;
   canonicalUrl: string; originalUrl: string; title: string; normalizedTitle: string; titleHash: string;
   source: string; sourceDomain: string; description: string; publishedAt: string | null; fetchedAt: string;
   dateKind: NewsCandidate['dateKind']; contentKind: NewsCandidate['contentKind']; rawMetadata: Record<string, unknown>;
@@ -76,6 +78,7 @@ export async function normalizeArticle(candidate: NewsCandidate): Promise<Normal
   const titleHash = [...new Uint8Array(hashBytes)].map((value) => value.toString(16).padStart(2, '0')).join('');
   const serialized = JSON.stringify(candidate.rawMetadata);
   return {
+    imageUrl:safeImageUrl(candidate.imageUrl),
     canonicalUrl: url, originalUrl: candidate.url, title, normalizedTitle, titleHash,
     source: plainText(candidate.source).slice(0, 200) || sourceDomain, sourceDomain,
     description: plainText(candidate.excerpt).slice(0, 10_000), publishedAt, fetchedAt,

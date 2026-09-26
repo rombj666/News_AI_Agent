@@ -37,10 +37,12 @@ test('normal test entrypoint blocks network even if API keys exist', async () =>
   await assert.rejects(() => fetch('https://example.com'), /Network disabled/);
 });
 
-test('RSS configuration is explicit, unique, disabled by default and rejects private/credential URLs', async () => {
-  const config = parseRssSources(JSON.parse(await readFile(new URL('../config/rss-sources.json', import.meta.url), 'utf8')));
-  assert.ok(config.length > 0);
-  assert.ok(config.every((entry) => !entry.enabled));
+test('RSS configuration requires explicit enablement, unique sources and public credential-free URLs', () => {
+  // Isolated inputs: the developer's live feed choices are not test defaults.
+  const config = parseRssSources([source, { ...source, id: 'example-world', url: 'https://example.com/world.xml', enabled: false }]);
+  assert.deepEqual(config.map((entry) => entry.enabled), [true, false]);
+  const { enabled: _enabled, ...withoutEnablement } = source;
+  assert.throws(() => parseRssSources([withoutEnablement]));
   assert.throws(() => parseRssSources([source, source]));
   for (const url of ['http://example.com/feed', 'https://127.0.0.1/rss', 'https://localhost/rss', 'https://user:password@example.com/rss']) {
     assert.throws(() => parseRssSources([{ ...source, url }]));

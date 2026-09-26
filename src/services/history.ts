@@ -1,12 +1,13 @@
 import { z } from 'zod';
-import { asUser, type Database } from '../db/database.js';
+import { asUser, type Database, type Queryable } from '../db/database.js';
 import { uuidSchema } from '../domain/preferences.js';
 
 export async function createConversation(db: Database, userId: string): Promise<string> {
-  return asUser(db, userId, async (tx) => {
+  return asUser(db, userId, tx => createConversationInTransaction(tx,userId));
+}
+export async function createConversationInTransaction(tx: Queryable, userId: string): Promise<string> {
     const result = await tx.query<{ id: string }>('INSERT INTO conversations (user_id) VALUES ($1) RETURNING id', [userId]);
     return result.rows[0]!.id;
-  });
 }
 
 const messageSchema = z.object({
@@ -17,14 +18,15 @@ const messageSchema = z.object({
 }).strict();
 
 export async function saveMessage(db: Database, userId: string, input: z.infer<typeof messageSchema>) {
+  return asUser(db,userId,tx => saveMessageInTransaction(tx,userId,input));
+}
+export async function saveMessageInTransaction(tx: Queryable, userId: string, input: z.infer<typeof messageSchema>) {
   const message = messageSchema.parse(input);
-  return asUser(db, userId, async (tx) => {
     const result = await tx.query<{ id: string }>(
       'INSERT INTO messages (user_id, conversation_id, role, content, created_at) VALUES ($1, $2, $3, $4, $5) RETURNING id',
       [userId, message.conversationId, message.role, message.content, message.createdAt.toISOString()],
     );
     return result.rows[0]!.id;
-  });
 }
 
 const searchSchema = z.object({

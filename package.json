@@ -11,8 +11,22 @@
     "test": "tsx --import ./scripts/offline-guard.mjs --test --test-concurrency=1 tests/*.test.ts",
     "demo": "tsx --import ./scripts/offline-guard.mjs scripts/demo.ts",
     "demo:quality": "tsx --import ./scripts/offline-guard.mjs scripts/quality-demo.ts",
+    "demo:digest": "tsx --import ./scripts/offline-guard.mjs scripts/digest-demo.ts",
+    "demo:telegram": "tsx --import ./scripts/offline-guard.mjs scripts/telegram-demo.ts",
+    "telegram:whoami": "node --env-file-if-exists=.env --import tsx scripts/telegram-whoami.ts",
+    "telegram:dev": "node --env-file-if-exists=.env --import tsx scripts/telegram-dev.ts",
+    "test:live:telegram": "node --env-file-if-exists=.env --import tsx scripts/telegram-live.ts",
+    "test:live:digest": "node --env-file-if-exists=.env --import tsx scripts/digest-live.ts",
     "test:live:retrieval": "node --env-file-if-exists=.env --import tsx scripts/retrieval-live.ts",
-    "test:live:openai": "node --env-file-if-exists=.env --import tsx scripts/openai-live.ts"
+    "test:live:openai": "node --env-file-if-exists=.env --import tsx scripts/openai-live.ts",
+    "digest:telegram-user": "node --env-file-if-exists=.env --import tsx scripts/digest-telegram-user.ts",
+    "scheduler:dev": "node --env-file-if-exists=.env --import tsx scripts/scheduler-local.ts --continuous",
+    "scheduled-run:telegram-user": "node --env-file-if-exists=.env --import tsx scripts/scheduler-local.ts",
+    "test:live:scheduled-pipeline": "node --env-file-if-exists=.env --import tsx scripts/scheduler-local.ts",
+    "schedule:settings": "node --env-file-if-exists=.env --import tsx scripts/schedule-settings.ts",
+    "demo:scheduler": "tsx --import ./scripts/offline-guard.mjs scripts/scheduler-demo.ts",
+    "telegram:diagnose": "node --env-file-if-exists=.env --import tsx scripts/telegram-diagnose.ts",
+    "images:diagnose": "node --env-file-if-exists=.env --import tsx scripts/images-diagnose.ts"
   },
   "dependencies": {
     "fast-xml-parser": "5.11.1",

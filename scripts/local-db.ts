@@ -1,6 +1,7 @@
 import { PGlite, type Transaction } from '@electric-sql/pglite';
 import type { Database, Queryable } from '../src/db/database.js';
 import { loadMigrations, migrate } from './migrations.js';
+import { open,unlink } from 'node:fs/promises';
 
 function queries(client: PGlite | Transaction): Queryable {
   return {
@@ -10,8 +11,13 @@ function queries(client: PGlite | Transaction): Queryable {
 }
 
 export async function localDatabase(dataDir?: string) {
+  // PGlite cannot safely share a data directory across Node processes.
+  // Persistent runners all acquire this lock before opening the engine.
+  const lockPath=dataDir?`${dataDir}.process-lock`:null;
+  const lock=lockPath?await open(lockPath,'wx'):null;
+  const release=async()=>{if(lock&&lockPath){await lock.close();await unlink(lockPath);}};
   const engine = new PGlite(dataDir);
-  await engine.waitReady;
+  try {await engine.waitReady;} catch(error) {await release();throw error;}
   const owner: Database = {
     ...queries(engine),
     transaction: (work) => engine.transaction((tx) => work(queries(tx))),
@@ -44,6 +50,11 @@ export async function localDatabase(dataDir?: string) {
       GRANT SELECT, INSERT ON quality_runs TO news_quality;
       GRANT SELECT, INSERT, UPDATE, DELETE ON story_clusters, article_cluster_members TO news_quality;
       GRANT SELECT ON story_clusters, article_cluster_members TO news_runtime;
+      GRANT SELECT, INSERT, UPDATE ON digests, digest_items TO news_runtime;
+      GRANT SELECT, INSERT, UPDATE ON telegram_sessions, telegram_updates, telegram_deliveries, user_feedback TO news_runtime;
+      GRANT SELECT ON delivery_settings TO news_runtime;
+      GRANT SELECT, INSERT, UPDATE ON scheduled_pipeline_runs TO news_runtime;
+      GRANT SELECT, INSERT, UPDATE ON scheduled_collection_batches TO news_collector;
     `);
     const runtime: Database = {
       query: <T>(sql: string, params?: unknown[]) => runtime.transaction((tx) => tx.query<T>(sql, params)),
@@ -69,9 +80,9 @@ export async function localDatabase(dataDir?: string) {
         return work(queries(tx));
       }),
     };
-    return { owner, runtime, collector, quality, close: () => engine.close() };
+    return { owner, runtime, collector, quality, close: async () => {try{await engine.close();}finally{await release();}} };
   } catch (error) {
-    await engine.close();
+    try{await engine.close();}finally{await release();}
     throw error;
   }
 }

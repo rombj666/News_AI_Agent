@@ -6,6 +6,7 @@ import { openaiLiveConfig, OpenAILiveConfigError } from '../src/ai/live-config.j
 import { refreshQuality } from '../src/quality/service.js';
 import { rankStories } from '../src/ai/ranking.js';
 import { asUser } from '../src/db/database.js';
+import { qualityDiagnostic } from './quality-diagnostic.js';
 async function main() {
   const config=openaiLiveConfig(process.env); // Fail before DB writes/network.
   const model=new OpenAIResponses(process.env);
@@ -17,7 +18,11 @@ async function main() {
     const quality=await refreshQuality(db.quality,now);
     // One bounded request, at most three fresh clusters. No retrieval or invented fixtures.
     quality.candidates=quality.candidates.slice(0,3);
-    if(!quality.candidates.length) throw new ModelError('NO_FRESH_CANDIDATES');
+    if(!quality.candidates.length) {
+      console.error(qualityDiagnostic(quality.statistics,quality.config.windowHours));
+      console.error('Refresh through RSS only; see docs/LIVE_QUALITY_DIAGNOSIS.md.');
+      throw new ModelError('NO_FRESH_CANDIDATES');
+    }
     const id=crypto.randomUUID();
     const result=await rankStories(db.runtime,model,config.userId,id,quality,config.limits,now);
     const usage=await asUser(db.runtime,config.userId,tx=>tx.query(`SELECT model,input_tokens,output_tokens,cached_input_tokens,

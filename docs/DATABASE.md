@@ -1,5 +1,15 @@
 # Database
 
+## Migration 0007: local scheduling
+
+Adds a security-invoker `delivery_settings` view over confirmed preferences,
+shared `scheduled_collection_batches`, and private `scheduled_pipeline_runs`.
+The latter has unique user/local-date/type and user/digest claims, stage outcomes,
+timestamps and safe failure codes. Existing `telegram_deliveries` now accepts
+either an update origin or a scheduled-run origin, with composite owner foreign
+keys and unique scheduled parts. RLS protects all private pipeline state.
+No deployed migration was edited. See [scheduling](SCHEDULING.md).
+
 The full target schema is specification section 6. Migration 0001 implements foundation tables and remains unchanged. Migration 0002 adds retrieval; digests/delivery/memory tables remain later work.
 
 ## Migration 0002 — retrieval
@@ -34,3 +44,13 @@ Migrations run transactionally with a version/checksum ledger. Reapplying an unc
 Adds articles.last_seen_at (backfilled from fetched_at), quality_runs (evaluation time, algorithm/config/statistics), story_clusters (representative, title/topic, observation times, source/article counts, active state and run) and article_cluster_members (unique article membership, match reason and similarity). Existing migrations are unchanged. No raw articles or private provenance are deleted.
 
 A refresh atomically replaces derived memberships, deactivates old clusters and upserts current clusters under quality/article-write locks. Local news_quality can read articles/aliases and write quality state but cannot read chats or private retrieval runs. Runtime can read clusters/members. Equivalent Neon roles remain deployment work. See [quality pipeline](QUALITY_PIPELINE.md) for snapshot semantics and limits.
+
+## Migrations 0004 and 0005 — metered ranking and digests
+
+Migration 0004 extends existing jobs/usage with result/request keys, reservations
+and safe error codes. Migration 0005 adds owner-scoped `digests` and
+`digest_items`, a composite user/job key, retained digest revisions, period/type
+uniqueness, and one-running-digest protection. Forced RLS and composite foreign
+keys protect both new tables. User runtime gets SELECT/INSERT/UPDATE locally;
+production must use a separately provisioned non-owner role. No older migration
+was edited or applied remotely. See [digest generation](DIGEST_GENERATION.md).

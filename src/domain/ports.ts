@@ -4,6 +4,7 @@ export interface Clock { now(): Date }
 export const systemClock: Clock = { now: () => new Date() };
 
 export interface NewsCandidate {
+  imageUrl?: string | null;
   url: string;
   title: string;
   source: string;

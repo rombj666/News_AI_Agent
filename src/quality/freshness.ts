@@ -2,7 +2,7 @@ import { parseDate } from '../retrieval/normalize.js';
 import type { QualityConfig } from './config.js';
 import type { Freshness, QualityArticle } from './types.js';
 
-export function freshness(article: QualityArticle, now: Date, config: QualityConfig): Freshness {
+export function freshness(article: Pick<QualityArticle,'publishedAt'|'dateKind'>, now: Date, config: QualityConfig): Freshness {
   if (!Number.isFinite(now.getTime())) throw new Error('Invalid evaluation time');
   if (!article.publishedAt) return 'undated';
   const published = parseDate(article.publishedAt);

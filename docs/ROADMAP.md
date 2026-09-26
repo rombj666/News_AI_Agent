@@ -8,13 +8,52 @@ Implementation authorized on 2026-09-17. Work proceeds milestone by milestone fr
 | 1 Foundation | Complete for local development: typed config/ports, migration runner, user ownership/RLS, preference confirmation, usage ledger, private history, local fixtures/demo and tests. Live identity/account integration remains milestone 4/7 work. |
 | 2 Retrieval | Implemented: configurable RSS/Atom + Brave News, migration 0002, shared articles/aliases, private run provenance, filters/deduplication, feed validators, reservations/ledger, fixtures and explicit env-gated live test. Verification below. |
 | 3 Article quality | Complete locally: additive migration 0003, canonical URLs, deterministic duplicate/story matching, strict freshness, persisted clusters, source links and offline demo. |
-| Next — Preferences/digest | Not started: complete topic/region/source persistence, temporary interests, Luna classification/ranking/briefing and metered calls. |
-| 4 Telegram | Not started: live identity/webhook integration, commands, delivery, conversation modes, feedback. |
-| 5 Context/memory | Not started: context assembly, summaries/consolidation, temporary expiry, historical Q&A. |
-| 6 Local acceptance | Not started: full pipeline, schedules, multi-user and failure/allowance validation. |
-| 7 Personal deployment | Not started: Neon branch, Cloudflare Worker/Cron, live secrets, monitoring and pilot. |
+| 4 Luna ranking | Implemented locally; user reports successful live verification. Structured classification/ranking, user-scoped jobs and usage accounting. |
+| 5 Personalized daily digest | Implemented; user reports live verification through the Telegram-linked manual pipeline. Persisted ranked inputs, preference selection, Luna summaries and attributed digests. |
+| 6 Telegram | Implemented and user-reported live verified: local polling, commands, stored-story explanations, feedback, confirmed preferences, usage and update deduplication. |
+| Later context/memory and local acceptance | Not started: bounded context, archival summaries, temporary interests, full pipeline and scheduling validation. |
+| 7 Local scheduled pipeline | Implemented locally; verification recorded below. Shared retrieval, timezone-aware daily claims, ranking/digest, direct Telegram delivery and opt-in one-run test. Live scheduled run remains to be verified. |
+| Later personal deployment | Deferred explicitly: Neon production, Cloudflare Worker/Cron, webhook, monitoring and pilot. |
 
-Retrieval adapters now exist behind an explicit live-test gate. There is still no LLM call, digest generation, Telegram delivery, cron, registration, billing or frontend. Worker remains health-only.
+Milestone 7 follows the user's revised scope: local scheduling before production.
+Provider calls retain explicit live gates. Cloudflare Cron/deployment, registration,
+commercial billing and frontend remain deferred. Worker remains health-only.
+
+## Milestone 7 local implementation
+
+Image follow-up: live BBC feed metadata verified; duplicate NULL-image enrichment,
+count-only diagnostics, explicit manual `--force` regeneration and bounded
+Telegram command-menu startup recovery implemented. See [image workflow](TELEGRAM_IMAGES.md).
+Deployment remains deferred.
+
+Live Telegram diagnosis: intermittent connection reset reproduced by read-only
+probes. The failed `/news` stopped on a plain-text header, not a photo. Migration
+0009 preserves safe error codes; sends are serialized and render failures handled.
+All 162 offline tests passed. Live retest remains required; see
+[diagnostics](TELEGRAM_DIAGNOSTICS.md). No deployment started.
+
+Pre-deployment Telegram UX polish: implemented saved-setting overview, detailed
+preferences, natural-language schedule proposals, concise generation/Explain,
+optional source-provided RSS images and a three-command menu. Migration 0008 adds
+image URLs and last-story context. All 152 tests passed; see [UX details](TELEGRAM_UX.md).
+
+See [SCHEDULING.md](SCHEDULING.md) for settings confirmation, commands, schema,
+timezones, budgets, shared retrieval, duplicate prevention and recovery limits.
+No real scheduled provider calls or Telegram sends were performed during implementation.
+The user's earlier live verification covers Milestone 6, not this new scheduler.
+
+Local validation: `npm run check`, all 144 offline tests, `npm run demo:scheduler`,
+foundation demo and Telegram demo passed. The scheduler demo used a fake 07:00
+Kuala Lumpur clock, one mocked retrieval, one ranking, one digest, three Telegram
+messages, and a duplicate restart with no further calls. Actual provider cost $0.
+
+## Milestone 5 verification — 2026-09-23
+
+`npm run check`, all 86 tests (19 new digest tests), `npm run demo:digest`,
+`npm run demo`, and `npm run demo:quality` passed. The digest demo saved/rendered
+four fictional stories using mocks, at $0 actual provider cost. The gated live
+digest command was not run. No provider generation, retrieval, deployment or
+Milestone 6 work occurred. See [digest implementation and limits](DIGEST_GENERATION.md).
 
 ## Verification
 
@@ -34,6 +73,11 @@ Verified on 2026-09-17: `npm run check` passed; `npm test` passed all 38 tests (
 No live provider test was run. Neon connection behavior and multi-connection concurrency remain unverified; migrations are tested with PGlite's PostgreSQL engine. Both migrations initialize fresh databases, and checksum protection remains active.
 
 ## Next setup dependencies
+
+Manual Telegram digest bridge: `npm run digest:telegram-user` resolves the existing
+allowlisted Telegram identity, reuses eligible owned rankings or ranks fresh stored
+articles, and saves a NORMAL digest in the polling database. No retrieval or
+scheduling is added. See [manual setup](TELEGRAM_MANUAL_DIGEST.md).
 
 Use local ignored environment files / cloud secrets for OpenAI, Brave, Telegram, and Neon credentials. Confirm personal timezone/time/language/topics during onboarding; spec examples are not actual preferences. Verify account-level Luna access with a bounded live check only once configured. Embeddings remain deferred; no blocker for full-text history.
 

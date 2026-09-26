@@ -1,5 +1,12 @@
 # Setup and boundaries
 
+Current local scheduling setup: [SCHEDULING.md](SCHEDULING.md). Preview/confirm
+settings with `schedule:settings`, then explicitly opt into a one-run test or
+`scheduler:dev`. The latter runs polling and scheduling in one PGlite process.
+No Neon branch, Cloudflare deployment or webhook is required for this phase.
+Live scripts load `.env`; normal tests/demos do not. Older foundation notes below
+are historical; the scheduling guide describes current live requirements.
+
 1. Run npm ci, npm run check, npm test, npm run demo with Node 22.12+.
 2. No accounts or credentials are required for the foundation. PGlite runs the migration against an isolated local PostgreSQL engine, with no installed database server.
 3. For explicit retrieval live testing, create an ignored .env from .env.example and follow docs/NEWS_PIPELINE.md. Only that command reads it. Store secrets there rather than in chat. Cloudflare will use secret bindings.
