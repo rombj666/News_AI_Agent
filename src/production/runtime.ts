@@ -19,8 +19,17 @@ export function productionDatabases(config:ReturnType<typeof productionConfig>) 
   return {runtime:runtime.db,collector:collector.db,quality:quality.db,
     close:async()=>{await Promise.all([runtime.close(),collector.close(),quality.close()]);}};
 }
-export async function productionReady(env:ProductionEnv) {
-  const config=productionConfig(env),db=productionDatabases(config);
+// Readiness and execution must validate the same optional retrieval settings.
+export function productionSchedulingConfig(env:ProductionEnv,config:ReturnType<typeof productionConfig>) {
+  const schedule=schedulingConfig({...env,RUN_LIVE_SCHEDULED_PIPELINE:'YES'});
+  const brave=schedule.braveQuery?liveRetrievalConfig({...env,RUN_LIVE_RETRIEVAL:'YES',
+    LIVE_RSS_SOURCE_ID:config.sources[0]!.id,LIVE_BRAVE_QUERY:schedule.braveQuery}):null;
+  return {...schedule,brave};
+}
+export async function productionReady(env:ProductionEnv,databases=productionDatabases) {
+  const config=productionConfig(env);
+  if(config.schedule)productionSchedulingConfig(env,config);
+  const db=databases(config);
   try {
     for(const [telegramId,userId] of config.identities)await asUser(db.runtime,userId,async tx=>{
       const row=await tx.query(`SELECT u.id FROM users u JOIN user_preferences p ON p.user_id=u.id
@@ -30,7 +39,6 @@ export async function productionReady(env:ProductionEnv) {
     });
     await db.collector.query('SELECT id FROM scheduled_collection_batches LIMIT 0');
     await db.quality.query('SELECT id FROM quality_runs LIMIT 0');
-    if(config.schedule)schedulingConfig({...env,RUN_LIVE_SCHEDULED_PIPELINE:'YES'});
   }finally{await db.close();}
 }
 export async function processInteractiveInbox(env:ProductionEnv,userIds?:readonly string[]) {
@@ -47,28 +55,30 @@ export async function processInteractiveInbox(env:ProductionEnv,userIds?:readonl
     }
   }finally{await connection.close();}
 }
-export async function productionTick(env:ProductionEnv,now=new Date()) {
+export async function productionTick(env:ProductionEnv,now=new Date(),deps={
+  processInbox:processInteractiveInbox,databases:productionDatabases,runPipeline:runScheduledPipeline,log:console.log,
+}) {
   const config=productionConfig(env),deadline=Date.now()+10*60000;
   // Recovery of pending interactive updates runs with only the runtime role.
   // Its connection is fully closed before scheduled collection/generation begins.
-  await processInteractiveInbox(env);
+  await deps.processInbox(env);
   if(!config.schedule)return;
-  const db=productionDatabases(config);
+  const schedule=productionSchedulingConfig(env,config);
+  const db=deps.databases(config);
   try {
     const transport=new TelegramApi(config.telegram.token,workerFetch,1100,console.log);
     const model=new OpenAIResponses(env);
-    const schedule=schedulingConfig({...env,RUN_LIVE_SCHEDULED_PIPELINE:'YES'});
     const sources:CollectionSource[]=config.sources.map(source=>({retriever:new RssRetriever(source),request:{source,category:source.category,limit:30}}));
-    if(schedule.braveQuery) {
-      const brave=liveRetrievalConfig({...env,RUN_LIVE_RETRIEVAL:'YES',LIVE_RSS_SOURCE_ID:config.sources[0]!.id,LIVE_BRAVE_QUERY:schedule.braveQuery});
+    if(schedule.brave) {
+      const brave=schedule.brave;
       sources.push({retriever:new BraveRetriever(brave.braveKey),request:{query:brave.query,category:'scheduled-public',limit:10},limits:brave.limits});
     }
     for(const [telegramId,userId] of config.identities) {
       if(Date.now()>=deadline)break;
-      const result=await runScheduledPipeline({db:db.runtime,collector:db.collector,quality:db.quality,model,transport,
+      const result=await deps.runPipeline({db:db.runtime,collector:db.collector,quality:db.quality,model,transport,
         botId:config.telegram.botId,sources,rankingLimits:schedule.rankingLimits,digestLimits:schedule.digestLimits,
         notifyEmpty:schedule.notifyEmpty,log:console.log},userId,telegramId,now);
-      console.log(`PRODUCTION_SCHEDULE_RESULT: ${result.status}`);
+      deps.log(`PRODUCTION_SCHEDULE_RESULT: ${result.status}`);
     }
   }finally{await db.close();}
 }

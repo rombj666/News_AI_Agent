@@ -2,6 +2,13 @@
 
 Implementation authorized on 2026-09-17. Work proceeds milestone by milestone from NEWS_AI_PROJECT_SPEC.md.
 
+Production audit follow-up (2026-09-29): shared readiness/execution validation now
+covers optional Brave configuration; production tick and preference diagnostics
+have added offline regression coverage. See [audit and deployment runbook](PRODUCTION_CONFIG_AUDIT.md).
+No deployment or memory/context work performed. Schedule enablement remains gated
+on validating approved ranking/digest budgets and production bindings; Cloudflare
+authentication was unavailable in this workspace.
+
 | Milestone | Status / acceptance |
 |---|---|
 | 0 Documentation | Architecture, data, news, memory, Telegram, costs, decisions, and setup docs written; Luna API ID verified. Account access, source list and personal settings still need setup before live work. |

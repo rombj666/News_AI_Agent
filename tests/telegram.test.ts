@@ -77,6 +77,24 @@ test('/news without a digest never generates or retrieves news',async()=>{
   assert.equal(last(f.transport).plain,'Your news briefing is not ready yet.');assert.equal(model.calls,0);
   assert.equal((await ownRows(f.userId,'ai_usage')).rows.length,0);
 });
+for(const code of ['MODEL_TIMEOUT','MODEL_NETWORK_OR_RESPONSE_ERROR','PREFERENCE_OUTPUT_INVALID','MODEL_OUTPUT_OR_PROVIDER_ERROR']) {
+  test(`preference failure logs ${code}, retains unknown reservation and cannot replay`,async()=>{
+    let calls=0;
+    const f=await fixture(false,{model:LUNA_MODEL,generate:async()=>{calls++;throw new ModelError(code);}});
+    const before=await readPreferences(db.runtime,f.userId),update=messageUpdate(900+f.telegramId,f.telegramId,'Give me more AI news');
+    assert.equal(await f.handle(update),'failed');
+    assert.deepEqual(f.logs,[`TELEGRAM_APPLICATION_REQUEST_FAILED: ${code}`]);
+    assert.equal(last(f.transport).plain,"I couldn't process that request right now.");
+    const usage=(await ownRows(f.userId,'ai_usage')).rows[0]!;
+    assert.equal(usage.status,'unknown');assert.equal(usage.estimated_cost_nanodollars,null);
+    assert.ok(BigInt(String(usage.reserved_cost_nanodollars))>0n);assert.equal(usage.error_code,code);
+    const job=(await ownRows(f.userId,'job_runs')).rows[0]!;
+    assert.equal(job.status,'failed');assert.equal(job.error_code,code);
+    assert.deepEqual(await readPreferences(db.runtime,f.userId),before);
+    assert.equal((await ownRows(f.userId,'pending_preference_changes')).rows.length,0);
+    assert.equal(await f.handle(update),'duplicate');assert.equal(calls,1);
+  });
+}
 test('/news sends the saved digest and source buttons without model calls',async()=>{
   const model=telegramFixtureModel(),f=await fixture(true,model);
   await f.handle(messageUpdate(8,f.telegramId,'/news'));
@@ -202,10 +220,11 @@ test('provider failure and budget rejection give safe replies with appropriate a
   assert.equal((await ownRows(f.userId,'ai_usage')).rows[0]!.status,'unknown');
   const model=telegramFixtureModel(),b=await fixture(false,model);
   const handle=createTelegramRouter({db:db.runtime,botId:'123456',identities:b.identities,transport:b.transport,
-    ai:{model,limits:{monthlyBudgetNanodollars:1n}},now:()=>now});
+    ai:{model,limits:{monthlyBudgetNanodollars:1n,budgetScope:'conversation'}},now:()=>now,log:code=>b.logs.push(code)});
   await handle(messageUpdate(32,b.telegramId,'Give me more AI news.'));
   assert.equal(last(b.transport).plain,'The AI request is temporarily unavailable.');assert.equal(model.calls,0);
   assert.equal((await ownRows(b.userId,'ai_usage')).rows.length,0);
+  assert.deepEqual(b.logs,['TELEGRAM_APPLICATION_REQUEST_FAILED: PREFERENCE_BUDGET_EXCEEDED']);
 });
 test('conversation persistence reuses messages and stores Telegram metadata separately under RLS',async()=>{
   const f=await fixture();await f.handle(messageUpdate(33,f.telegramId,'/start'));await f.handle(messageUpdate(34,f.telegramId,'/help'));

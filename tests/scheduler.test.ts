@@ -22,6 +22,17 @@ test('07:00 local user is due, earlier user is not, disabled user is skipped',()
   assert.equal(occurrence(new Date(+now-60000),prefs),null);
   assert.equal(occurrence(now,{...prefs,deliveryEnabled:false}),null);
 });
+test('disabled and not-yet-due pipelines do no retrieval, AI, delivery or daily claim',async()=>{
+  const f=await schedulerFixture();try {
+    assert.equal((await runScheduledPipeline(f.deps,f.userId,f.telegramId,new Date(+now-60000))).status,'not_due');
+    const p=await readPreferences(f.db.runtime,f.userId);
+    const proposal=await proposePreferences(f.db.runtime,f.userId,{...p.document,deliveryEnabled:false},{now:()=>now},p.version);
+    await decideProposal(f.db.runtime,f.userId,proposal.id,'confirm',{now:()=>now});
+    assert.equal((await runScheduledPipeline(f.deps,f.userId,f.telegramId,now)).status,'not_due');
+    assert.deepEqual(f.counts,{retrieval:0,ranking:0,digest:0});assert.equal(f.transport.sent.length,0);
+    assert.equal((await asUser(f.db.runtime,f.userId,tx=>tx.query('SELECT id FROM scheduled_pipeline_runs'))).rows.length,0);
+  }finally{await f.db.close();}
+});
 test('different timezone, spring gap and fall repeated hour preserve one local occurrence',()=>{
   assert.equal(occurrence(new Date('2026-09-26T10:00:00Z'),{...prefs,timezone:'America/New_York'}),null);
   const gap=occurrence(new Date('2026-03-08T07:00:00Z'),{...prefs,timezone:'America/New_York',deliveryTime:'02:30'});
@@ -85,6 +96,8 @@ for(const stage of ['ranking','digest'] as const) test(`${stage} failure records
     }};
     const result=await runScheduledPipeline(f.deps,f.userId,f.telegramId,now);
     assert.equal(result.status,'failed');assert.equal(result.failureStage,stage);assert.equal(f.transport.sent.length,0);
+    const run=await asUser(f.db.runtime,f.userId,tx=>tx.query('SELECT failure_stage,failure_code FROM scheduled_pipeline_runs WHERE id=$1',[result.runId]));
+    assert.equal(run.rows[0]!.failure_stage,stage);assert.equal(run.rows[0]!.failure_code,'MODEL_TIMEOUT');
     assert.equal((await runScheduledPipeline(f.deps,f.userId,f.telegramId,now)).status,'already_attempted');
     const usage=await asUser(f.db.runtime,f.userId,tx=>tx.query('SELECT status FROM ai_usage'));
     assert.ok(usage.rows.some(r=>r.status==='unknown'));

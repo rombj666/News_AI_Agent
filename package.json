@@ -7,6 +7,7 @@
     "node": ">=22.12.0"
   },
   "scripts": {
+    "production:check-config": "node --env-file-if-exists=.env --env-file-if-exists=.dev.vars --import tsx scripts/production-config-check.ts",
     "check": "tsc --noEmit",
     "test": "tsx --import ./scripts/offline-guard.mjs --test --test-concurrency=1 tests/*.test.ts",
     "demo": "tsx --import ./scripts/offline-guard.mjs scripts/demo.ts",

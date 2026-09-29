@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createWorker } from '../src/entrypoints/worker.js';
 import { pooledDatabase,type TransactionPool } from '../src/db/neon.js';
+import { productionReady,productionTick } from '../src/production/runtime.js';
+import type { Database } from '../src/db/database.js';
 
 const token='123456:abcdefghijklmnopqrstuvwxyz0123456789',secret='s'.repeat(32);
 const userId='11111111-1111-4111-8111-111111111111';
@@ -11,7 +13,51 @@ const productionEnv={PRODUCTION_HEALTH_SECRET:secret,TELEGRAM_WEBHOOK_SECRET:'w'
   COLLECTOR_DATABASE_URL:'postgresql://collector:password@example.neon.tech/db?sslmode=require',
   QUALITY_DATABASE_URL:'postgresql://quality:password@example.neon.tech/db?sslmode=require',
   RSS_SOURCES_JSON:JSON.stringify([{id:'bbc',name:'BBC',url:'https://feeds.bbci.co.uk/news/technology/rss.xml',category:'technology',enabled:true}]),
-  PRODUCTION_SCHEDULE_ENABLED:'NO'};
+  PRODUCTION_SCHEDULE_ENABLED:'YES'};
+
+const scheduledEnv={...productionEnv,PRODUCTION_SCHEDULE_ENABLED:'YES',OPENAI_API_KEY:'fixture-only',
+  OPENAI_MODEL:'gpt-5.6-luna',OPENAI_RANKING_MONTHLY_BUDGET_NANODOLLARS:'100000000',
+  OPENAI_DIGEST_MONTHLY_BUDGET_NANODOLLARS:'100000000'};
+function fakeDatabases(events:string[]) {
+  const database=(role:string):Database=>({
+    async exec(){throw Error('unexpected exec');},
+    async query<T>(){events.push(role);return {rows:[{id:userId}] as T[]};},
+    async transaction(work){return work(database(role));},
+  });
+  return ()=>({runtime:database('runtime'),collector:database('collector'),quality:database('quality'),
+    async close(){events.push('close');}});
+}
+test('production schedule NO drains interactive inbox without opening scheduled databases',async()=>{
+  const events:string[]=[];
+  await productionTick(productionEnv,new Date(),{processInbox:async()=>{events.push('inbox');},
+    databases:()=>{throw Error('schedule must not execute');},runPipeline:async()=>{throw Error('unexpected pipeline');},log:()=>{}});
+  assert.deepEqual(events,['inbox']);
+});
+test('production schedule YES drains inbox then permits pipeline and logs only status',async()=>{
+  const events:string[]=[],logs:string[]=[];
+  await productionTick(scheduledEnv,new Date(),{processInbox:async()=>{events.push('inbox');},databases:fakeDatabases(events),
+    runPipeline:async(_deps,id,telegramId)=>{assert.equal(id,userId);assert.equal(telegramId,'12345');events.push('pipeline');return {status:'not_due'};},
+    log:code=>logs.push(code)});
+  assert.deepEqual(events,['inbox','pipeline','close']);assert.deepEqual(logs,['PRODUCTION_SCHEDULE_RESULT: not_due']);
+});
+for(const field of ['OPENAI_RANKING_MONTHLY_BUDGET_NANODOLLARS','OPENAI_DIGEST_MONTHLY_BUDGET_NANODOLLARS']) {
+  test(`enabled schedule readiness and tick refuse missing ${field}`,async()=>{
+    const env={...scheduledEnv,[field]:undefined},events:string[]=[];
+    await assert.rejects(()=>productionReady(env,fakeDatabases(events)),new RegExp(field));
+    await assert.rejects(()=>productionTick(env,new Date(),{processInbox:async()=>{events.push('inbox');},
+      databases:fakeDatabases(events),runPipeline:async()=>{throw Error('unexpected pipeline');},log:()=>{}}),new RegExp(field));
+    assert.deepEqual(events,['inbox']);
+  });
+}
+test('readiness validates all three database roles; disabled schedule needs no AI budgets',async()=>{
+  for(const env of [productionEnv,scheduledEnv]) {
+    const events:string[]=[];await productionReady(env,fakeDatabases(events));
+    assert.deepEqual(events,['runtime','runtime','runtime','collector','quality','close']);
+  }
+});
+test('readiness refuses an enabled Brave query without explicit key and accounting config',async()=>{
+  await assert.rejects(()=>productionReady({...scheduledEnv,SCHEDULE_BRAVE_QUERY:'AI news'},fakeDatabases([])),/BRAVE_API_KEY/);
+});
 
 test('normal scheduled handler retains recovery/scheduling tick',async()=>{
   let ticks=0;

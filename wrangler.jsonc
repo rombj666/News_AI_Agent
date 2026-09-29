@@ -12,7 +12,7 @@
 
     "RSS_SOURCES_JSON": "[{\"id\":\"bbc-technology\",\"name\":\"BBC Technology\",\"url\":\"https://feeds.bbci.co.uk/news/technology/rss.xml\",\"category\":\"technology\",\"enabled\":true}]",
 
-    "PRODUCTION_SCHEDULE_ENABLED": "NO",
+    "PRODUCTION_SCHEDULE_ENABLED": "YES",
     "SCHEDULE_NOTIFY_EMPTY": "NO",
     "SCHEDULE_BRAVE_QUERY": ""
   },
