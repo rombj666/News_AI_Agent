@@ -7,9 +7,13 @@ import { readDigest } from '../digest/service.js';
 import { readPreferences, proposePreferences, decideProposal } from './preferences.js';
 import { requestHash, runModelJob, type ModelLimits } from '../ai/metered.js';
 import { ModelError } from '../ai/openai.js';
+import { classifyMessage } from './news-intent.js';
+export { classifyMessage } from './news-intent.js';
+import { proposeSchedule,scheduleSummary,displayTime } from './schedule.js';
+import { NewsNowError,type NewsNowHandler } from './news-now.js';
 
-export type AssistantReply={kind:'text';text:string}|{kind:'digest';digest:Digest}|{kind:'proposal';text:string;proposalId:string};
-export type AssistantAction={kind:'explain'|'more'|'less';digestId:string;position:number}|{kind:'confirm'|'cancel';proposalId:string};
+export type AssistantReply={kind:'text';text:string;menu?:boolean}|{kind:'digest';digest:Digest}|{kind:'proposal';text:string;proposalId:string};
+export type AssistantAction={kind:'explain'|'more'|'less';digestId:string;position:number}|{kind:'confirm'|'cancel';proposalId:string}|{kind:'navigate';command:'/news'|'/schedule'|'/preferences'};
 export interface AssistantRequest {userId:string;operationId:string;text?:string;action?:AssistantAction;currentDigestId?:string;currentStoryPosition?:number}
 export const assistantHelp='Use /start to see your settings and examples.';
 const textReply=(text:string):AssistantReply=>({kind:'text',text});
@@ -26,13 +30,14 @@ export function preferenceSummary(p:Preferences):string {
     '', 'Priorities: 0 excludes, 5 is highest. Lists show up to 12 entries.'].join('\n');
 }
 export function startSummary(p:Preferences):string {
-  const names=(v:Record<string,number>)=>Object.entries(v).filter(([,n])=>n>0).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([k])=>k).join(', ')||'Not set';
-  return ['Welcome to My News AI 👋','','Your setup','📰 Digest: '+display(p.digestLength),'✨ Style: '+display(p.writingStyle),
-    '⏰ Delivery: '+(p.deliveryEnabled?'Enabled':'Disabled')+' · '+p.deliveryTime,'🌏 Timezone: '+p.timezone,
-    'Topics: '+names(p.topics),'Regions: '+names(p.regions),'Excluded: '+(p.exclusions.slice(0,6).join(', ')||'Not set'),
-    '', 'Commands','/news — latest saved briefing','/preferences — view your settings','',
-    'You can also just talk to me:','“Give me more AI news”','“Send my news at 8:30 AM”','“Stop showing football”','“Why is story 2 important?”',
-    '', 'Permanent changes ask for confirmation first.'].join('\n');
+  return ['👋 Welcome to My News AI','','I can find fresh news now or send you a daily briefing.',
+    '', '📰 News now','/news — fresh personalized news','/latest — latest saved briefing, without a search',
+    '“Give me the latest AI news”','“What’s happening in Malaysia today?”',
+    '', '🔍 Ask about something','“What’s happening with NVIDIA?”','“Latest OpenAI news”',
+    '', '⏰ Daily briefing','/schedule','“Send my news at 8:30 AM”',
+    `Current: ${p.deliveryEnabled?'Enabled':'Disabled'} · ${displayTime(p.deliveryTime)} · ${p.timezone}`,
+    '', '⚙️ Preferences','/preferences','“Give me more AI news every day”','“Stop showing entertainment news”',
+    '', 'Permanent changes always ask for confirmation.','One-time news requests do not change your settings.'].join('\n');
 }
 export async function ownedStory(db:Database,userId:string,digestId:string,position:number):Promise<{digest:Digest;item:DigestItem}> {
   uuidSchema.parse(digestId);
@@ -49,14 +54,6 @@ export async function recordStoryFeedback(db:Database,userId:string,digestId:str
   [userId,digestId,position,direction,now.toISOString()]));
 }
 
-export function classifyMessage(text:string):'search'|'question'|'preference'|'temporary'|'unsupported' {
-  if(/\b(search|look up|latest|live news|minutes? ago|right now)\b/i.test(text)) return 'search';
-  if(/\b(today|this week|this month|temporar(?:y|ily)|for now|until)\b/i.test(text) && /\b(more|less|prefer|stop|priority|show|give)\b/i.test(text)) return 'temporary';
-  if(/\bstory\s*\d+\b/i.test(text)) return 'question';
-  if(/explain deeper|more detail|explain the background/i.test(text))return 'question';
-  if(/\b(more|less|stop showing|exclude|prefer|priority|digest|language|delivery|briefing|timezone|time zone|UK time|send my news)\b/i.test(text)) return 'preference';
-  return 'unsupported';
-}
 const explanationSchema=z.object({answer:z.string().min(1).max(1800),evidence:z.array(z.object({articleId:z.uuid(),quote:z.string().min(8).max(300)}).strict()).min(1).max(3)}).strict();
 const proposalSchema=z.object({action:z.enum(['topic_priority','region_priority','exclude_topic','digest_length','language','delivery_time','delivery_enabled','timezone','clarify']),
   key:z.string().max(80).nullable(),priority:z.number().int().min(0).max(5).nullable(),value:z.string().max(35).nullable(),
@@ -136,15 +133,23 @@ async function interpretPreference(db:Database,model:LanguageModel,limits:ModelL
   return {kind:'proposal',proposalId:proposal.id,text:`Proposed permanent change:\n${preview}\n\nConfirm to save, or Cancel. Expires in 15 minutes.`};
 }
 
-export async function respondToNews(db:Database,request:AssistantRequest,ai:{model:LanguageModel;limits:ModelLimits}|null,now=new Date()):Promise<AssistantReply> {
+export async function respondToNews(db:Database,request:AssistantRequest,ai:{model:LanguageModel;limits:ModelLimits}|null,now=new Date(),newsNow?:NewsNowHandler):Promise<AssistantReply> {
   uuidSchema.parse(request.userId);uuidSchema.parse(request.operationId);
   const active=await asUser(db,request.userId,tx=>tx.query("SELECT id FROM users WHERE id=$1 AND status='active'",[request.userId]));
   if(!active.rows.length) throw new DomainError('FORBIDDEN');
   const action=request.action;
+  if(action?.kind==='navigate')return respondToNews(db,{userId:request.userId,operationId:request.operationId,text:action.command},ai,now,newsNow);
   if(action) {
     if(action.kind==='confirm'||action.kind==='cancel') {
+      const before=await readPreferences(db,request.userId);
       await decideProposal(db,request.userId,action.proposalId,action.kind,{now:()=>now});
-      return textReply(action.kind==='confirm'?'Preference saved. It will apply to future briefings.':'Preference change cancelled.');
+      if(action.kind==='cancel')return textReply('Preference change cancelled.');
+      // Separate read after the confirmation transaction committed.
+      const committed=await readPreferences(db,request.userId);
+      const scheduleChanged=before.document.deliveryTime!==committed.document.deliveryTime
+        ||before.document.deliveryEnabled!==committed.document.deliveryEnabled||before.document.timezone!==committed.document.timezone;
+      return textReply(scheduleChanged?`✅ Schedule updated.\n\nStatus: ${committed.document.deliveryEnabled?'Enabled':'Disabled'}\nDaily briefing time: ${displayTime(committed.document.deliveryTime)}\nTimezone: ${committed.document.timezone}`
+        :'Preference saved. It will apply to future briefings.');
     }
     if('digestId' in action) {
       await ownedStory(db,request.userId,action.digestId,action.position);
@@ -158,16 +163,33 @@ export async function respondToNews(db:Database,request:AssistantRequest,ai:{mod
   }
   const message=z.string().trim().min(1).max(1500).parse(request.text);
   const command=message.split(/\s/)[0]!.toLowerCase();
-  if(command==='/start') return textReply(startSummary((await readPreferences(db,request.userId)).document));
-  if(command==='/help') return textReply(assistantHelp);
-  if(command==='/news') {const digest=await latestDigest(db,request.userId);return digest?{kind:'digest',digest}:textReply('Your news briefing is not ready yet.');}
+  if(command==='/start'||command==='/help') return {kind:'text',text:startSummary((await readPreferences(db,request.userId)).document),menu:true};
+  if(command==='/latest') {const digest=await latestDigest(db,request.userId);return digest?{kind:'digest',digest}:textReply('Your news briefing is not ready yet.');}
   if(command==='/preferences') return textReply(preferenceSummary((await readPreferences(db,request.userId)).document));
   const intent=classifyMessage(message);
-  if(intent==='search') return textReply('Live search is not enabled in the Telegram conversation yet.');
-  if(intent==='temporary') return textReply('Temporary interests are not supported here yet. Tell me if you want a permanent preference change.');
-  if(intent==='unsupported') return textReply(assistantHelp);
+  if(intent==='NEWS_NOW'||intent==='CURRENT_NEWS_QUESTION') {
+    if(!newsNow)throw new NewsNowError('LIVE_NEWS_CONFIGURATION_MISSING','retrieval');
+    const digest=await newsNow({userId:request.userId,operationId:request.operationId,text:message,
+      question:intent==='CURRENT_NEWS_QUESTION',now});
+    return digest?{kind:'digest',digest}:textReply("I couldn't find enough fresh news for that request.");
+  }
+  if(intent==='TEMPORARY_INTEREST')return textReply('Temporary interests are not supported here yet. You can ask for news now, or propose a permanent preference change.');
+  if(intent==='SCHEDULE_CHANGE') {
+    if(command==='/schedule') {
+      const value=message.slice(command.length).trim();
+      if(!value)return textReply(scheduleSummary((await readPreferences(db,request.userId)).document));
+      return await proposeSchedule(db,request.userId,value,now)??textReply('Use /schedule 08:30, /schedule 8:30 PM, /schedule on or /schedule off.');
+    }
+    const time=/\b(?:at|to)\s+(\d{1,2}(?::\d{2})?(?:\s*[AP]M)?)\s*[.!?]?$/i.exec(message)?.[1];
+    if(time) {
+      const proposal=await proposeSchedule(db,request.userId,time,now);
+      if(proposal)return proposal;
+      return textReply('Please use a time such as 08:30 or 8:30 PM.');
+    }
+  }
+  if(intent==='UNSUPPORTED'||intent==='COMMAND') return textReply(assistantHelp);
   if(!ai) return textReply('AI replies are not enabled for this local bot yet.');
-  if(intent==='preference') return interpretPreference(db,ai.model,ai.limits,{...request,text:message},now);
+  if(intent==='PERMANENT_PREFERENCE'||intent==='SCHEDULE_CHANGE') return interpretPreference(db,ai.model,ai.limits,{...request,text:message},now);
   const position=Number(/\bstory\s*(\d+)\b/i.exec(message)?.[1]??request.currentStoryPosition);
   if(!Number.isInteger(position)||position<1||position>30)return textReply('Which story? For example: “Explain story 2 in more detail.”');
   const digestId=request.currentDigestId??(await latestDigest(db,request.userId))?.id;

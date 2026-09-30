@@ -136,7 +136,7 @@ test('saved digest render failure produces a safe reply and persists diagnostic 
     await db.owner.query("UPDATE digests SET document=jsonb_set(document,'{generatedAt}','\"invalid\"'::jsonb) WHERE id=$1",[digest.id]);
     const logs:string[]=[],transport=new FakeTelegram();
     const handle=createTelegramRouter({db:db.runtime,botId:'123456',identities:new Map([['12345',userId]]),transport,ai:null,log:s=>logs.push(s),now:()=>now});
-    const update=messageUpdate(1,12345,'/news');assert.equal(await handle(update),'failed');
+    const update=messageUpdate(1,12345,'/latest');assert.equal(await handle(update),'failed');
     assert.match(transport.sent[0]!.message.plain,/could not be displayed/);assert.match(logs[0]!,/TELEGRAM_RENDER_FAILED/);
     const rows=await asUser(db.runtime,userId,tx=>tx.query('SELECT error_code FROM telegram_updates'));
     assert.equal(rows.rows[0]!.error_code,'TELEGRAM_RENDER_INVALID SAVED_DIGEST_INVALID');
@@ -149,11 +149,11 @@ test('failed plain header persists connection reason and does not attempt story 
     await generateDigest(db.runtime,digestFixtureModel,{userId,operationId:crypto.randomUUID(),rankingOperationIds:[ranking],periodStart:DIGEST_START,periodEnd:DIGEST_END},limits,{},now);
     const transport=new FakeTelegram();transport.failure=new TelegramError('TELEGRAM_NETWORK_OR_RESPONSE_ERROR',null,'CONNECTION_RESET');
     const handle=createTelegramRouter({db:db.runtime,botId:'123456',identities:new Map([['12345',userId]]),transport,ai:null,now:()=>now});
-    const update=messageUpdate(2,12345,'/news');assert.equal(await handle(update),'failed');
+    const update=messageUpdate(2,12345,'/latest');assert.equal(await handle(update),'failed');
     const rows=await asUser(db.runtime,userId,tx=>tx.query('SELECT part,status,error_code FROM telegram_deliveries'));
     assert.equal(rows.rows.length,1);assert.equal(rows.rows[0]!.part,0);assert.equal(rows.rows[0]!.status,'uncertain');assert.match(String(rows.rows[0]!.error_code),/CONNECTION_RESET/);
     transport.failure=null;assert.equal(await handle(update),'duplicate');
-    assert.equal(await handle(messageUpdate(3,12345,'/news')),'completed');assert.equal(transport.sent.length,5);
+    assert.equal(await handle(messageUpdate(3,12345,'/latest')),'completed');assert.equal(transport.sent.length,5);
   }finally{await db.close();}
 });
 test('already saved preference is a normal reply rather than an application failure',async()=>{

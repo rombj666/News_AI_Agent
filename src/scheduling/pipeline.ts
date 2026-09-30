@@ -47,7 +47,7 @@ export async function runScheduledPipeline(deps:PipelineDeps,userId:string,teleg
       return {status:'no_fresh',runId:claim.id};
     }
     // Reuse an already saved digest for this local date/type without reranking.
-    const existing=await asUser(db,userId,async tx=>(await tx.query<{document:Digest}>(`SELECT document FROM digests WHERE user_id=$1 AND status='succeeded' AND digest_type=$2
+    const existing=await asUser(db,userId,async tx=>(await tx.query<{document:Digest}>(`SELECT document FROM digests WHERE user_id=$1 AND status='succeeded' AND digest_type=$2 AND purpose='scheduled'
       AND (generated_at AT TIME ZONE $3)::date=$4::date ORDER BY generated_at DESC LIMIT 1`,[userId,type,profile.document.timezone,due.localDate])).rows[0]?.document);
     let digest=existing??null;
     if(!digest) {

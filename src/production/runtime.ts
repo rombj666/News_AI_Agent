@@ -10,8 +10,11 @@ import { liveRetrievalConfig } from '../retrieval/live-config.js';
 import { schedulingConfig } from '../scheduling/config.js';
 import { runScheduledPipeline } from '../scheduling/pipeline.js';
 import type { CollectionSource } from '../scheduling/collection.js';
-import { drainInbox } from './inbox.js';
+import { drainInbox,isNewsUpdate } from './inbox.js';
 import type { Fetcher } from '../retrieval/http.js';
+import { configuredNewsNow,newsNowConfig } from './news.js';
+import { NewsNowError } from '../services/news-now.js';
+import { BraveConfigError } from '../retrieval/brave-config.js';
 
 const workerFetch:Fetcher=(url,init)=>globalThis.fetch(url,init);
 export function productionDatabases(config:ReturnType<typeof productionConfig>) {
@@ -28,6 +31,7 @@ export function productionSchedulingConfig(env:ProductionEnv,config:ReturnType<t
 }
 export async function productionReady(env:ProductionEnv,databases=productionDatabases) {
   const config=productionConfig(env);
+  if(config.telegram.aiEnabled)newsNowConfig(env);
   if(config.schedule)productionSchedulingConfig(env,config);
   const db=databases(config);
   try {
@@ -36,22 +40,34 @@ export async function productionReady(env:ProductionEnv,databases=productionData
         WHERE u.id=$1 AND u.telegram_user_id=$2 AND u.status='active'`,[userId,telegramId]);
       if(!row.rows.length)throw Error('PRODUCTION_IDENTITY_NOT_READY');
       await tx.query('SELECT update_id FROM telegram_webhook_inbox LIMIT 0');
+      await tx.query('SELECT id FROM news_now_runs LIMIT 0');
     });
     await db.collector.query('SELECT id FROM scheduled_collection_batches LIMIT 0');
     await db.quality.query('SELECT id FROM quality_runs LIMIT 0');
   }finally{await db.close();}
 }
-export async function processInteractiveInbox(env:ProductionEnv,userIds?:readonly string[]) {
+export async function processInteractiveInbox(env:ProductionEnv,userIds?:readonly string[],lightweightOnly=false) {
   const config=productionConfig(env),connection=neonDatabase(config.runtimeUrl,'news_runtime');
   try {
     const transport=new TelegramApi(config.telegram.token,workerFetch,1100,console.log);
     const model=config.telegram.aiEnabled?new OpenAIResponses(env):null;
     const router=createTelegramRouter({db:connection.db,botId:config.telegram.botId,identities:config.identities,transport,
-      ai:model?{model,limits:config.telegram.limits!}:null,log:console.log});
+      ai:model?{model,limits:config.telegram.limits!}:null,log:console.log,
+      newsNow:async request=>{
+        if(!model)throw new NewsNowError('LIVE_NEWS_AI_DISABLED','retrieval');
+        try {newsNowConfig(env);}catch(error) {
+          if(error instanceof BraveConfigError)console.log(`LIVE_NEWS_CONFIG_FIELDS: ${error.fields.join(',')}`);
+          throw new NewsNowError('LIVE_NEWS_CONFIGURATION_INVALID','retrieval');
+        }
+        const databases=productionDatabases(config);
+        try{return await configuredNewsNow(env,{...databases,runtime:connection.db},model,config.sources)(request);}
+        finally{await databases.close();}
+      }});
     const selected=userIds??[...config.identities.values()];
     for(const userId of selected) {
       if(![...config.identities.values()].includes(userId))continue;
-      await drainInbox(connection.db,userId,config.telegram.botId,raw=>router(raw),5,Date.now()+240000);
+      await drainInbox(connection.db,userId,config.telegram.botId,raw=>router(raw),lightweightOnly?1:5,
+        Date.now()+(lightweightOnly?20000:240000),raw=>!lightweightOnly||!isNewsUpdate(raw));
     }
   }finally{await connection.close();}
 }

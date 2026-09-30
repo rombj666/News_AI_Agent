@@ -32,6 +32,14 @@ async function setup(): Promise<DigestRequest> {
 }
 const run = (request: DigestRequest, provider = model, database = db.runtime) => generateDigest(database,provider,request,limits,{},now);
 const fake = (generate: LanguageModel['generate']): LanguageModel => ({model:LUNA_MODEL,generate});
+test('entertainment news exclusion matches entertainment category without changing preferences',()=>{
+  const prefs={...initialPreferences(),exclusions:['entertainment news']};
+  const story:RankedStory={rankingOperationId:crypto.randomUUID(),headline:'Fictional awards ceremony',sources:[],
+    classification:{clusterId:crypto.randomUUID(),primaryCategory:'culture',secondaryCategories:[],region:null,countries:[],
+      importanceScore:90,userRelevanceScore:90,confidence:0.9,importanceReason:'Fixture',entities:[],topics:['entertainment']}};
+  assert.equal(selectDigestStories([story],prefs,'normal').length,0);
+  assert.deepEqual(prefs.exclusions,['entertainment news']);
+});
 const digestUsage = (userId: string) => asUser(db.runtime,userId,tx => tx.query<{
   status:string;estimated_cost_nanodollars:string|null;input_tokens:number|null;output_tokens:number|null;cached_input_tokens:number|null;
   reserved_cost_nanodollars:number;job_type:string;execution_time_ms:number;

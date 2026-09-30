@@ -15,9 +15,11 @@ const requestSchema = z.object({
   userId:uuidSchema, operationId:uuidSchema, rankingOperationIds:z.array(uuidSchema).max(10),
   periodStart:z.date(), periodEnd:z.date(), type:digestTypeSchema.optional(),
   force:z.boolean().default(false),
+  windowHours:z.number().int().min(1).max(168).default(24),allowPageAge:z.boolean().default(false),
+  purpose:z.enum(['scheduled','news_now','current_question']).default('scheduled'),
 }).strict();
 export type DigestRequest = z.input<typeof requestSchema>;
-type DigestRow = {id:string;status:string;document:Digest|null;revision:number};
+type DigestRow = {id:string;status:string;document:Digest|null;revision:number;purpose:string};
 
 export async function readDigest(db: Database, userId: string, id: string): Promise<Digest | null> {
   uuidSchema.parse(id);
@@ -30,7 +32,7 @@ export async function generateDigest(db: Database, model: LanguageModel, raw: Di
   const request = requestSchema.parse(raw);
   const config = digestConfigSchema.parse(options), limits = modelLimitsSchema.parse({maxOutputTokens:6000,...rawLimits});
   const {userId,operationId,periodStart,periodEnd} = request;
-  if (!Number.isFinite(now.getTime()) || periodStart >= periodEnd || +periodEnd - +periodStart > 86400000
+  if (!Number.isFinite(now.getTime()) || periodStart >= periodEnd || +periodEnd - +periodStart > request.windowHours*3600000
     || periodStart > now || +periodEnd > +now + 86400000) throw new ModelError('DIGEST_PERIOD_INVALID');
   if (model.model !== LUNA_MODEL) throw new ModelError('MODEL_NOT_ALLOWED');
   const profile = await asUser(db,userId,async tx => {
@@ -41,13 +43,13 @@ export async function generateDigest(db: Database, model: LanguageModel, raw: Di
   });
   const type = request.type ?? profile.document.digestLength;
   const periodParams = [userId,periodStart.toISOString(),periodEnd.toISOString(),type];
-  const latest = async (tx: Queryable) => (await tx.query<DigestRow>(`SELECT id,status,document,revision FROM digests
+  const latest = async (tx: Queryable) => (await tx.query<DigestRow>(`SELECT id,status,document,revision,purpose FROM digests
     WHERE user_id=$1 AND period_start=$2 AND period_end=$3 AND digest_type=$4 ORDER BY revision DESC LIMIT 1`,periodParams)).rows[0];
   const previous = await asUser(db,userId,latest);
-  if (previous?.status === 'succeeded' && (!request.force || previous.id === operationId)) return {digest:previous.document!,replayed:true};
-  if (previous && (previous.status === 'running' || !request.force)) throw new ModelError('DIGEST_ALREADY_ATTEMPTED');
+  if (previous?.status === 'succeeded' && previous.purpose===request.purpose && (!request.force || previous.id === operationId)) return {digest:previous.document!,replayed:true};
+  if (previous && (previous.status === 'running' || (!request.force&&previous.purpose===request.purpose))) throw new ModelError('DIGEST_ALREADY_ATTEMPTED');
 
-  const ranked = await loadRankedStories(db,userId,request.rankingOperationIds,now,periodStart,periodEnd);
+  const ranked = await loadRankedStories(db,userId,request.rankingOperationIds,now,periodStart,periodEnd,{windowHours:request.windowHours,allowPageAge:request.allowPageAge});
   let selected = selectDigestStories(ranked,profile.document,type,config).map(story => ({...story,
     headline:story.headline.slice(0,500),sources:story.sources.slice(0,config.maxSourcesPerStory)
       .map(source => ({...source,snippet:source.snippet.slice(0,config.snippetCharacters)}))}));
@@ -75,10 +77,10 @@ export async function generateDigest(db: Database, model: LanguageModel, raw: Di
         WHERE p.user_id=$1 AND u.status='active' FOR UPDATE OF p`,[userId])).rows[0];
       if (current?.version !== profile.version) throw new ModelError('DIGEST_PREFERENCES_STALE');
       const prior = await latest(tx);
-      if (prior && (prior.status === 'running' || !request.force)) throw new ModelError('DIGEST_ALREADY_ATTEMPTED');
+      if (prior && (prior.status === 'running' || (!request.force&&prior.purpose===request.purpose))) throw new ModelError('DIGEST_ALREADY_ATTEMPTED');
       await tx.query(`INSERT INTO digests(id,user_id,period_start,period_end,digest_type,revision,status,model,
-        preference_version,input_story_count,created_at) VALUES($1,$2,$3,$4,$5,$6,'running',$7,$8,$9,$10)`,
-      [operationId,...periodParams,(prior?.revision??0)+1,LUNA_MODEL,profile.version,selected.length,now.toISOString()]);
+        preference_version,input_story_count,created_at,purpose) VALUES($1,$2,$3,$4,$5,$6,'running',$7,$8,$9,$10,$11)`,
+      [operationId,...periodParams,(prior?.revision??0)+1,LUNA_MODEL,profile.version,selected.length,now.toISOString(),request.purpose]);
     },
     async settle(tx,output,error) {
       if (error || !output) {
@@ -102,7 +104,7 @@ export async function generateDigest(db: Database, model: LanguageModel, raw: Di
         await tx.query(`INSERT INTO digest_items(user_id,digest_id,story_cluster_id,position,section,headline,summary,why_it_matters,metadata)
           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)`,[userId,operationId,item.clusterId,++position,section.name,item.headline,item.summary,item.whyItMatters,JSON.stringify(item)]);
       }
-      document = {id:operationId,userId,title:'Morning Briefing',type,language:profile.document.language,
+      document = {id:operationId,userId,title:request.purpose==='scheduled'?'Morning Briefing':'News now',type,language:profile.document.language,
         periodStart:periodStart.toISOString(),periodEnd:periodEnd.toISOString(),generatedAt:now.toISOString(),model:LUNA_MODEL,
         preferenceVersion:profile.version,inputStoryCount:selected.length,outputStoryCount:position,sections};
       await tx.query(`UPDATE digests SET status='succeeded',document=$3::jsonb,generated_at=$4,output_story_count=$5

@@ -8,6 +8,8 @@
   },
   "scripts": {
     "production:check-config": "node --env-file-if-exists=.env --env-file-if-exists=.dev.vars --import tsx scripts/production-config-check.ts",
+    "production:check-live": "node --env-file-if-exists=.env --env-file-if-exists=.dev.vars --import tsx scripts/production-live-check.ts",
+    "demo:foundation": "tsx --import ./scripts/offline-guard.mjs scripts/demo.ts",
     "check": "tsc --noEmit",
     "test": "tsx --import ./scripts/offline-guard.mjs --test --test-concurrency=1 tests/*.test.ts",
     "demo": "tsx --import ./scripts/offline-guard.mjs scripts/demo.ts",

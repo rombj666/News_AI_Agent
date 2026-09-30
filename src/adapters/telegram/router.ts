@@ -7,8 +7,10 @@ import { ModelError } from '../../ai/openai.js';
 import { renderTelegramDigest, renderText } from './render.js';
 import { telegramUpdateSchema, type TelegramDelivery, type TelegramMessage } from './types.js';
 import { safeFailure,definiteRejection } from './diagnostics.js';
+import { NewsNowError,type NewsNowHandler } from '../../services/news-now.js';
 
 export function parseCallback(data:string):AssistantAction|null {
+  if(data==='nav:news'||data==='nav:schedule'||data==='nav:preferences')return {kind:'navigate',command:`/${data.slice(4)}` as '/news'|'/schedule'|'/preferences'};
   if(new TextEncoder().encode(data).length>64) return null;
   const match=/^([emlcx]):([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(?::([1-9]|[12]\d|30))?$/.exec(data);
   if(!match) return null;
@@ -20,11 +22,15 @@ export function parseCallback(data:string):AssistantAction|null {
 function renderReply(reply:AssistantReply):TelegramMessage[] {
   if(reply.kind==='digest') return renderTelegramDigest(reply.digest);
   const messages=renderText(reply.text);
+  if(reply.kind==='text'&&reply.menu)messages[messages.length-1]!.buttons=[[
+    {text:'📰 News now',callback_data:'nav:news'},{text:'⏰ Schedule',callback_data:'nav:schedule'},
+    {text:'⚙️ Preferences',callback_data:'nav:preferences'}]];
   if(reply.kind==='proposal') messages[messages.length-1]!.buttons=[[
     {text:'Confirm',callback_data:`c:${reply.proposalId}`},{text:'Cancel',callback_data:`x:${reply.proposalId}`}]];
   return messages;
 }
 function userError(error:unknown):string {
+  if(error instanceof NewsNowError)return error.stage==='retrieval'?'Live news search is temporarily unavailable.':"I found news, but couldn't prepare the briefing right now.";
   if(error instanceof DomainError) {
     if(error.code==='NO_CHANGE') return 'That preference is already set.';
     if(['EXPIRED','STALE','NOT_PENDING'].includes(error.code)) return 'That preference request expired, changed, or was already handled. Please propose it again.';
@@ -34,7 +40,7 @@ function userError(error:unknown):string {
   return "I couldn't process that request right now.";
 }
 export function createTelegramRouter(deps:{db:Database;botId:string;identities:ReadonlyMap<string,string>;
-  transport:TelegramDelivery;ai:Parameters<typeof respondToNews>[2];now?:()=>Date;log?:(code:string)=>void}) {
+  transport:TelegramDelivery;ai:Parameters<typeof respondToNews>[2];newsNow?:NewsNowHandler;now?:()=>Date;log?:(code:string)=>void}) {
   const {db,botId,identities,transport}=deps;
   const log=deps.log??(()=>{});
   return async (raw:unknown,signal?:AbortSignal):Promise<'ignored'|'unauthorized'|'duplicate'|'completed'|'failed'>=>{
@@ -93,7 +99,7 @@ export function createTelegramRouter(deps:{db:Database;botId:string;identities:R
       else if(!callback&&(!message.text||message.text.length>1500)) reply={kind:'text',text:'Please send a text request of at most 1,500 characters.'};
       else reply=await respondToNews(db,{userId,operationId:claim.operationId,
         ...(action?{action}:{text:message.text!}),...(claim.current_digest_id?{currentDigestId:claim.current_digest_id}:{}),
-        ...(claim.current_story_position?{currentStoryPosition:claim.current_story_position}:{})},deps.ai,now);
+        ...(claim.current_story_position?{currentStoryPosition:claim.current_story_position}:{})},deps.ai,now,deps.newsNow);
     } catch(error) {
       if(error instanceof DomainError&&error.code==='NO_CHANGE')log('TELEGRAM_PREFERENCE_ALREADY_SET');
       else {failed=true;errorCode=safeFailure(error);log(`TELEGRAM_APPLICATION_REQUEST_FAILED: ${errorCode}`);}

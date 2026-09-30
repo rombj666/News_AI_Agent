@@ -61,7 +61,7 @@ test('groups, bot senders and mismatched private chat IDs cannot expose user dat
   const f=await fixture();
   const group=messageUpdate(3,f.telegramId,'/preferences');group.message.chat.type='group';group.message.chat.id=-900;
   const spoof=messageUpdate(4,f.telegramId,'/preferences');spoof.message.chat.id=123;
-  const bot=messageUpdate(5,f.telegramId,'/news');bot.message.from.is_bot=true;
+  const bot=messageUpdate(5,f.telegramId,'/latest');bot.message.from.is_bot=true;
   for(const update of [group,spoof,bot]) assert.equal(await f.handle(update),'ignored');
   assert.equal(f.transport.sent.length,0);
 });
@@ -71,9 +71,9 @@ test('disabled application user cannot use protected commands or AI',async()=>{
   assert.equal(await f.handle(messageUpdate(6,f.telegramId,'/preferences')),'unauthorized');
   assert.equal(model.calls,0);assert.match(last(f.transport).plain,/not authorized/);
 });
-test('/news without a digest never generates or retrieves news',async()=>{
+test('/latest without a digest never generates or retrieves news',async()=>{
   const model=telegramFixtureModel(),f=await fixture(false,model);
-  await f.handle(messageUpdate(7,f.telegramId,'/news'));
+  await f.handle(messageUpdate(7,f.telegramId,'/latest'));
   assert.equal(last(f.transport).plain,'Your news briefing is not ready yet.');assert.equal(model.calls,0);
   assert.equal((await ownRows(f.userId,'ai_usage')).rows.length,0);
 });
@@ -95,9 +95,9 @@ for(const code of ['MODEL_TIMEOUT','MODEL_NETWORK_OR_RESPONSE_ERROR','PREFERENCE
     assert.equal(await f.handle(update),'duplicate');assert.equal(calls,1);
   });
 }
-test('/news sends the saved digest and source buttons without model calls',async()=>{
+test('/latest sends the saved digest and source buttons without model calls',async()=>{
   const model=telegramFixtureModel(),f=await fixture(true,model);
-  await f.handle(messageUpdate(8,f.telegramId,'/news'));
+  await f.handle(messageUpdate(8,f.telegramId,'/latest'));
   assert.equal(model.calls,0);assert.equal(f.transport.sent.length,5);
   const buttons=f.transport.sent.flatMap(s=>s.message.buttons?.flat()??[]);
   assert.equal(buttons.filter(b=>b.text==='Explain').length,4);
@@ -110,7 +110,7 @@ test('/preferences and /help return concise user-facing summaries, with no AI',a
   const model=telegramFixtureModel(),f=await fixture(false,model);
   await f.handle(messageUpdate(9,f.telegramId,'/preferences'));
   assert.match(last(f.transport).plain,/Topics: Not set/);assert.doesNotMatch(last(f.transport).plain,/user_id|version|created_at/);
-  await f.handle(messageUpdate(10,f.telegramId,'/help'));assert.equal(last(f.transport).plain,'Use /start to see your settings and examples.');assert.equal(model.calls,0);
+  await f.handle(messageUpdate(10,f.telegramId,'/help'));assert.match(last(f.transport).plain,/Welcome to My News AI/);assert.equal(model.calls,0);
 });
 test('HTML renderer splits long stories safely and preserves source URLs in buttons',async()=>{
   const f=await fixture(true);const digest=structuredClone(f.digest!);
@@ -148,11 +148,11 @@ test('Explain is metered against stored context and repeated button actions reus
 });
 test('natural-language story question uses the displayed digest; unsupported live search never calls AI',async()=>{
   const model=telegramFixtureModel(),f=await fixture(true,model);
-  await f.handle(messageUpdate(15,f.telegramId,'/news'));
+  await f.handle(messageUpdate(15,f.telegramId,'/latest'));
   await f.handle(messageUpdate(16,f.telegramId,'Why is story 2 important?'));
   assert.equal(model.calls,1);assert.match(last(f.transport).plain,/saved briefing/);
   await f.handle(messageUpdate(17,f.telegramId,'Search what happened with Nvidia five minutes ago.'));
-  assert.match(last(f.transport).plain,/Live search is not enabled/);assert.equal(model.calls,1);
+  assert.match(last(f.transport).plain,/Live news search is temporarily unavailable/);assert.equal(model.calls,1);
 });
 test('preference proposal is pending until owner confirmation and is separately usage-accounted',async()=>{
   const model=telegramFixtureModel(),f=await fixture(false,model);
@@ -354,7 +354,7 @@ test('partially delivered digest keeps story-number context on the visible new b
   f.transport.sendMessage=async(chat,message)=>{
     if(++attempts===3)throw new TelegramError('TELEGRAM_NETWORK_OR_RESPONSE_ERROR');return send(chat,message);
   };
-  assert.equal(await f.handle(messageUpdate(63,f.telegramId,'/news')),'failed');
+  assert.equal(await f.handle(messageUpdate(63,f.telegramId,'/latest')),'failed');
   assert.equal((await ownRows(f.userId,'telegram_sessions')).rows[0]!.current_digest_id,f.digest!.id);
   assert.equal(f.transport.sent.length,2);
 });

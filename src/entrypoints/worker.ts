@@ -1,8 +1,9 @@
 import { productionConfig,type ProductionEnv } from '../production/config.js';
 import { processInteractiveInbox,productionReady,productionTick } from '../production/runtime.js';
 import { neonDatabase } from '../db/neon.js';
-import { enqueueUpdate } from '../production/inbox.js';
+import { enqueueUpdate,isNewsUpdate } from '../production/inbox.js';
 import { telegramUpdateSchema,type TelegramUpdate } from '../adapters/telegram/types.js';
+import { BraveConfigError } from '../retrieval/brave-config.js';
 
 async function secretMatches(actual:string|null,expected:string|undefined) {
   if(!actual||!expected||!/^[A-Za-z0-9_-]{32,256}$/.test(expected))return false;
@@ -36,7 +37,9 @@ export function createWorker(deps={
       if(request.method==='GET'&&path==='/health')return Response.json({status:'ok',service:'news-ai-agent',liveIntegrations:false});
       if(request.method==='GET'&&path==='/ready') {
         if(!await secretMatches(request.headers.get('Authorization')?.replace(/^Bearer /,'')??null,env.PRODUCTION_HEALTH_SECRET))return new Response(null,{status:403});
-        try{await deps.ready(env);return Response.json({status:'ready'});}catch{console.error('PRODUCTION_READINESS_FAILED');return Response.json({status:'not_ready'},{status:503});}
+        try{await deps.ready(env);return Response.json({status:'ready'});}catch(error){
+          if(error instanceof BraveConfigError)console.error(`PRODUCTION_READINESS_FIELDS: ${error.fields.filter(f=>/^[A-Z_]+$/.test(f)).join(',')}`);
+          console.error('PRODUCTION_READINESS_FAILED');return Response.json({status:'not_ready'},{status:503});}
       }
       if(path!=='/telegram/webhook')return new Response(null,{status:404});
       if(request.method!=='POST')return new Response(null,{status:405});
@@ -48,7 +51,9 @@ export function createWorker(deps={
         if(!sender||sender.is_bot||message?.chat.type!=='private'||message.chat.id!==sender.id)return new Response(null,{status:200});
         const userId=config.identities.get(String(sender.id));if(!userId)return new Response(null,{status:200});
         const inserted=await deps.enqueue(config,userId,update);
-        if(inserted&&ctx)ctx.waitUntil(deps.processInbox(env,[userId]));
+        // HTTP waitUntil is short-lived. The existing minute cron drains heavy
+        // news work in a scheduled event; lightweight replies still run promptly.
+        if(inserted&&ctx&&!isNewsUpdate(update))ctx.waitUntil(deps.processInbox(env,[userId],true));
         return new Response(null,{status:200});
       }catch{console.error('PRODUCTION_WEBHOOK_PERSIST_FAILED');return new Response(null,{status:503});}
     },

@@ -16,14 +16,14 @@ import { asUser } from '../src/db/database.js';
 
 test('start and detailed preferences use saved schedule, disabled state and empty settings',()=>{
   const p=initialPreferences();
-  assert.match(startSummary(p),/Disabled.*07:00/);assert.match(startSummary(p),/Topics: Not set/);assert.doesNotMatch(startSummary(p),/\/help/);
+  assert.match(startSummary(p),/Disabled.*7:00 AM/);assert.match(startSummary(p),/One-time news requests do not change/);assert.doesNotMatch(startSummary(p),/\/help/);
   p.deliveryEnabled=true;p.deliveryTime='18:30';p.timezone='Europe/London';p.topics={AI:5};p.regions={UK:4};p.exclusions=['Football'];
-  const text=startSummary(p);assert.match(text,/Enabled.*18:30/);assert.match(text,/Europe\/London/);assert.match(text,/Topics: AI/);assert.match(text,/Football/);
+  const text=startSummary(p);assert.match(text,/Enabled.*6:30 PM/);assert.match(text,/Europe\/London/);assert.match(text,/fresh personalized news/);
   assert.match(preferenceSummary(p),/Delivery time: 18:30\nTimezone: Europe\/London/);
 });
 test('all requested schedule phrases route to preference interpretation; deeper followups route to questions',()=>{
-  for(const text of ['Send my news at 8:30 AM every morning','Change my briefing to 6 PM','Stop automatic delivery','Turn automatic delivery back on','Use UK time','Make my digest quick','Send me a deep digest'])assert.equal(classifyMessage(text),'preference');
-  assert.equal(classifyMessage('Explain deeper'),'question');
+  for(const text of ['Send my news at 8:30 AM every morning','Change my briefing to 6 PM','Stop automatic delivery','Turn automatic delivery back on','Use UK time','Make my digest quick','Send me a deep digest'])assert.equal(classifyMessage(text),/digest/.test(text)?'PERMANENT_PREFERENCE':'SCHEDULE_CHANGE');
+  assert.equal(classifyMessage('Explain deeper'),'STORY_QUESTION');
 });
 test('schedule proposals use existing confirmation, cancel, ownership and accounting',async()=>{
   const db=await localDatabase();try {
@@ -89,5 +89,5 @@ test('stored cluster images reach safe captions; missing images and oversized st
 test('visible command menu contains only start, news and preferences',async()=>{
   let commands:unknown;
   const api=new TelegramApi('123456:abcdefghijklmnopqrstuvwxyz0123456789',async(_url,init)=>{commands=JSON.parse(String(init.body)).commands;return Response.json({ok:true,result:true});},0);
-  await api.setCommands();assert.deepEqual((commands as {command:string}[]).map(c=>c.command),['start','news','preferences']);
+  await api.setCommands();assert.deepEqual((commands as {command:string}[]).map(c=>c.command),['start','news','latest','schedule','preferences','help']);
 });

@@ -5,6 +5,8 @@ import { createTelegramRouter } from '../src/adapters/telegram/router.js';
 import { TelegramApi } from '../src/adapters/telegram/api.js';
 import { FakeTelegram, telegramFixtureModel, messageUpdate, callbackUpdate } from '../tests/fixtures/telegram.js';
 import { DIGEST_NOW,DIGEST_START,DIGEST_END,digestTestLimits,digestFixtureModel,seedDigestRankings } from '../tests/fixtures/digest.js';
+import { schedulerFixture,SCHEDULE_NOW } from '../tests/fixtures/scheduler.js';
+import { createNewsNow } from '../src/services/news-now.js';
 
 const db=await localDatabase();
 try {
@@ -27,7 +29,7 @@ try {
     ai:{model:telegramFixtureModel(),limits:digestTestLimits},now:()=>DIGEST_NOW});
   console.log('OFFLINE TELEGRAM DEMO: fake transport, fictional news and mock Luna. Actual provider cost $0.');
   await handle(messageUpdate(1,telegramId,'/start'));
-  await handle(messageUpdate(2,telegramId,'/news'));
+  await handle(messageUpdate(2,telegramId,'/latest'));
   await handle(messageUpdate(3,telegramId,'/preferences'));
   await handle(callbackUpdate(4,telegramId,`m:${digest.id}:1`));
   await handle(callbackUpdate(5,telegramId,`e:${digest.id}:1`));
@@ -37,3 +39,19 @@ try {
   await handle(messageUpdate(8,telegramId,'/preferences'));
   console.log('\nSchedule saved only after Confirm. No network or real provider charges.');
 } finally {await db.close();}
+
+const fresh=await schedulerFixture();
+try {
+  let searches=0;
+  const newsNow=createNewsNow({...fresh.deps,rss:fresh.deps.sources,
+    brave:{provider:'brave',async collect(){searches++;return {items:fresh.items,fetched:fresh.items.length,failures:[],notModified:false,etag:null,lastModified:null};}},
+    braveLimits:{braveCostPerRequest:1000n,monthlyBudget:100000n,pricingVersion:'fixture',dailyRequests:10}});
+  const handle=createTelegramRouter({db:fresh.db.runtime,botId:'123456',identities:new Map([[fresh.telegramId,fresh.userId]]),
+    transport:fresh.transport,ai:null,newsNow,now:()=>SCHEDULE_NOW});
+  const update=messageUpdate(20,Number(fresh.telegramId),'/news');
+  if(await handle(update)!=='completed')throw Error('MOCK_NEWS_NOW_FAILED');
+  if(await handle(update)!=='duplicate')throw Error('MOCK_DUPLICATE_FAILED');
+  await handle(messageUpdate(21,Number(fresh.telegramId),'/latest'));
+  if(searches!==1||fresh.counts.ranking!==1||fresh.counts.digest!==1)throw Error('MOCK_ACCOUNTING_FAILED');
+  console.log('MOCK NEWS NOW: one Brave search + RSS, one ranking, one saved digest. Duplicate update and /latest made no paid calls.');
+}finally{await fresh.db.close();}

@@ -3,14 +3,14 @@ import { ModelError } from '../ai/openai.js';
 import { asUser, type Database } from '../db/database.js';
 import { uuidSchema } from '../domain/preferences.js';
 import { freshness } from '../quality/freshness.js';
-import { qualityConfigSchema } from '../quality/config.js';
+import { qualityConfigSchema,type QualityOptions } from '../quality/config.js';
 import { canonicalUrl } from '../retrieval/normalize.js';
 import type { DigestSource, RankedStory } from './types.js';
 
 // Read only: no quality refresh, retrieval, or ranking call. Trust DB attribution,
 // never caller-supplied candidates or model-produced links.
 export async function loadRankedStories(db: Database, userId: string, operationIds: string[], now: Date,
-  periodStart: Date, periodEnd: Date): Promise<RankedStory[]> {
+  periodStart: Date, periodEnd: Date,qualityOptions:QualityOptions={}): Promise<RankedStory[]> {
   if (operationIds.length > 10 || new Set(operationIds).size !== operationIds.length) throw new ModelError('DIGEST_RANKING_LIMIT');
   operationIds.forEach(id => uuidSchema.parse(id));
   return asUser(db,userId,async tx => {
@@ -33,7 +33,7 @@ export async function loadRankedStories(db: Database, userId: string, operationI
         let headline: string | null = null;
         for (const row of members.rows) {
           const publishedAt = row.published_at?.toISOString() ?? null;
-          if (freshness({publishedAt,dateKind:row.date_kind},now,qualityConfigSchema.parse({})) !== 'fresh') continue;
+          if (freshness({publishedAt,dateKind:row.date_kind},now,qualityConfigSchema.parse(qualityOptions)) !== 'fresh') continue;
           if (!row.published_at || row.published_at < periodStart || row.published_at >= periodEnd) continue;
           canonicalUrl(row.canonical_url); // Validate stored links; preserve the exact stored value.
           headline ??= row.title;

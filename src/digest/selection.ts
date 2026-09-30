@@ -22,7 +22,9 @@ export function selectDigestStories(stories: RankedStory[], prefs: Preferences, 
     const topics = [c.primaryCategory,...c.secondaryCategories,...c.topics,...c.entities];
     const regions = [c.region ?? '',...c.countries];
     const sources = story.sources.map(s => new URL(s.url).hostname.replace(/^www\./,''));
-    if (prefs.exclusions.some(exclusion => matches(exclusion,[...topics,...regions,...sources,story.headline]))) continue;
+    // A user phrase such as "entertainment news" refers to the entertainment
+    // category even when the classifier does not append the generic word news.
+    if (prefs.exclusions.some(exclusion => matches(exclusion.replace(/\s+news$/i,''),[...topics,...regions,...sources,story.headline]))) continue;
     const topic = priority(prefs.topics,topics), region = priority(prefs.regions,regions), source = priority(prefs.sources,sources);
     if ([topic,region,source].includes(0)) continue;
     const selectionScore = c.userRelevanceScore * 0.6 + c.importanceScore * 0.4

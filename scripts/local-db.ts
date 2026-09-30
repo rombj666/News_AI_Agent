@@ -56,6 +56,7 @@ export async function localDatabase(dataDir?: string) {
       GRANT SELECT, INSERT, UPDATE ON scheduled_pipeline_runs TO news_runtime;
       GRANT SELECT, INSERT, UPDATE ON scheduled_collection_batches TO news_collector;
       GRANT SELECT, INSERT, UPDATE ON telegram_webhook_inbox TO news_runtime;
+      GRANT SELECT, INSERT, UPDATE ON news_now_runs TO news_runtime;
     `);
     const runtime: Database = {
       query: <T>(sql: string, params?: unknown[]) => runtime.transaction((tx) => tx.query<T>(sql, params)),

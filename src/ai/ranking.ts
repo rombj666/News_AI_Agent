@@ -3,7 +3,7 @@ import { asUser } from '../db/database.js';
 import { preferencesSchema, uuidSchema,type Preferences } from '../domain/preferences.js';
 import type { LanguageModel } from '../domain/ports.js';
 import { LUNA_MODEL } from '../config/index.js';
-import { qualityConfigSchema } from '../quality/config.js';
+import { qualityConfigSchema,type QualityOptions } from '../quality/config.js';
 import { freshness } from '../quality/freshness.js';
 import type { StoryCandidate } from '../quality/types.js';
 import { ModelError } from './openai.js';
@@ -13,19 +13,19 @@ import { rankingInstructions, rankingJsonSchema, rankingOutputSchema, type Class
 export type RankingLimits=ModelLimits;
 export type QualityInput={runId:string;candidates:StoryCandidate[]};
 const fail=(code:string):never=>{throw new ModelError(code);};
-function rankingContext(prefs:Preferences,candidates:StoryCandidate[]) {
-  return JSON.stringify({preferences:{topics:prefs.topics,regions:prefs.regions,sources:prefs.sources,exclusions:prefs.exclusions},
+function rankingContext(prefs:Preferences,candidates:StoryCandidate[],requestTopic?:string) {
+  return JSON.stringify({...(requestTopic?{oneTimeRequest:requestTopic,scope:'Prioritize this request over saved topics and regions; preserve exclusions. Do not change preferences.'}:{}),preferences:{topics:prefs.topics,regions:prefs.regions,sources:prefs.sources,exclusions:prefs.exclusions},
     stories:candidates.map(c=>({clusterId:c.clusterId,title:c.title.slice(0,500),description:c.representative.description.slice(0,1600),
       publishedAt:c.representative.publishedAt,source:c.representative.sourceDomain,sourceCount:c.sourceCount}))});
 }
-export function fitRankingCandidates(candidates:StoryCandidate[],prefs:Preferences,limits:ModelLimits,max=12) {
+export function fitRankingCandidates(candidates:StoryCandidate[],prefs:Preferences,limits:ModelLimits,max=12,requestTopic?:string) {
   const selected=candidates.slice(0,max);
-  while(selected.length&&modelInputBound(rankingInstructions,rankingContext(prefs,selected),rankingJsonSchema)>(limits.maxInputTokens??12000)) selected.pop();
+  while(selected.length&&modelInputBound(rankingInstructions,rankingContext(prefs,selected,requestTopic),rankingJsonSchema)>(limits.maxInputTokens??12000)) selected.pop();
   if(!selected.length&&candidates.length) throw new ModelError('INPUT_TOKEN_LIMIT');
   return selected;
 }
 export async function rankStories(db:Database,model:LanguageModel,userId:string,operationId:string,
-  quality:QualityInput,rawLimits:RankingLimits,now=new Date()) {
+  quality:QualityInput,rawLimits:RankingLimits,now=new Date(),options:{quality?:QualityOptions;requestTopic?:string}={}) {
   uuidSchema.parse(userId);uuidSchema.parse(operationId);uuidSchema.parse(quality.runId);
   const limits=modelLimitsSchema.parse(rawLimits);
   if(model.model!==LUNA_MODEL) fail('MODEL_NOT_ALLOWED');
@@ -33,7 +33,7 @@ export async function rankStories(db:Database,model:LanguageModel,userId:string,
   const candidates=quality.candidates;
   if(candidates.length===0) return {stories:[],replayed:false};
   if(candidates.length>20 || new Set(candidates.map(c=>c.clusterId)).size!==candidates.length) fail('CANDIDATE_LIMIT_OR_DUPLICATE');
-  const config=qualityConfigSchema.parse({});
+  const config=qualityConfigSchema.parse(options.quality??{});
   for(const c of candidates) {
     if(freshness(c.representative,now,config)!=='fresh') fail('CANDIDATE_NOT_FRESH');
   }
@@ -47,7 +47,7 @@ export async function rankStories(db:Database,model:LanguageModel,userId:string,
     const result=await db.query(`SELECT id FROM story_clusters WHERE id=$1 AND quality_run_id=$2 AND representative_article_id=$3 AND active=true`,[c.clusterId,quality.runId,c.representative.id]);
     if(!result.rows.length) fail('QUALITY_SNAPSHOT_STALE');
   }
-  const context=rankingContext(prefs,candidates);
+  const context=rankingContext(prefs,candidates,options.requestTopic);
   const key=await requestHash({context,qualityRun:quality.runId,model:model.model,limits:{...limits,monthlyBudgetNanodollars:limits.monthlyBudgetNanodollars.toString()}});
   const result=await runModelJob(db,model,{userId,operationId,jobType:'news_ranking',key,
     instructions:rankingInstructions,context,schema:rankingJsonSchema,limits,now,

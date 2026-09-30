@@ -1,5 +1,14 @@
 import { asUser,type Database } from '../db/database.js';
-import type { TelegramUpdate } from '../adapters/telegram/types.js';
+import { telegramUpdateSchema,type TelegramUpdate } from '../adapters/telegram/types.js';
+import { classifyMessage } from '../services/news-intent.js';
+
+export function isNewsUpdate(raw:unknown) {
+  const parsed=telegramUpdateSchema.safeParse(raw);if(!parsed.success)return false;
+  const update=parsed.data;
+  if(update.callback_query)return update.callback_query.data==='nav:news';
+  const intent=classifyMessage(update.message?.text??'');
+  return intent==='NEWS_NOW'||intent==='CURRENT_NEWS_QUESTION';
+}
 
 export async function enqueueUpdate(db:Database,userId:string,botId:string,update:TelegramUpdate) {
   return asUser(db,userId,async tx=>{
@@ -11,7 +20,8 @@ export async function enqueueUpdate(db:Database,userId:string,botId:string,updat
   });
 }
 
-export async function drainInbox(db:Database,userId:string,botId:string,handle:(raw:unknown)=>Promise<unknown>,limit=5,deadline=Date.now()+240000) {
+export async function drainInbox(db:Database,userId:string,botId:string,handle:(raw:unknown)=>Promise<unknown>,limit=5,deadline=Date.now()+240000,
+  canProcess:(raw:unknown)=>boolean=()=>true) {
   let processed=0;
   for(let i=0;i<limit&&Date.now()<deadline;i++) {
     const row=await asUser(db,userId,async tx=>{
@@ -21,10 +31,11 @@ export async function drainInbox(db:Database,userId:string,botId:string,handle:(
       await tx.query(`UPDATE telegram_webhook_inbox SET status='failed',payload=NULL,completed_at=now()
         WHERE user_id=$1 AND bot_id=$2 AND status='processing' AND started_at<now()-interval '20 minutes'`,[userId,botId]);
       if((await tx.query("SELECT 1 FROM telegram_webhook_inbox WHERE user_id=$1 AND bot_id=$2 AND status='processing'",[userId,botId])).rows.length)return;
+      const pending=(await tx.query<{update_id:string;payload:unknown}>(`SELECT update_id,payload FROM telegram_webhook_inbox
+        WHERE user_id=$1 AND bot_id=$2 AND status='pending' ORDER BY update_id LIMIT 1 FOR UPDATE SKIP LOCKED`,[userId,botId])).rows[0];
+      if(!pending||!canProcess(pending.payload))return;
       return (await tx.query<{update_id:string;payload:unknown}>(`UPDATE telegram_webhook_inbox SET status='processing',started_at=now()
-        WHERE (bot_id,update_id)=(SELECT bot_id,update_id FROM telegram_webhook_inbox
-          WHERE user_id=$1 AND bot_id=$2 AND status='pending' ORDER BY update_id LIMIT 1 FOR UPDATE SKIP LOCKED)
-        RETURNING update_id,payload`,[userId,botId])).rows[0];
+        WHERE user_id=$1 AND bot_id=$2 AND update_id=$3 AND status='pending' RETURNING update_id,payload`,[userId,botId,pending.update_id])).rows[0];
     });
     if(!row)break;
     let status='completed';

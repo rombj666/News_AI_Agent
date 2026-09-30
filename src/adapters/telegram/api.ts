@@ -140,7 +140,9 @@ export class TelegramApi implements TelegramPolling {
     await this.call('answerCallbackQuery',{callback_query_id:id,text},signal);
   }
   async setCommands(signal?:AbortSignal):Promise<void> {
-    await this.call('setMyCommands',{commands:[{command:'start',description:'Your setup and examples'},{command:'news',description:'Latest saved briefing'},{command:'preferences',description:'View your settings'}]},signal);
+    await this.call('setMyCommands',{commands:[{command:'start',description:'Help and examples'},{command:'news',description:'Fresh personalized news now'},
+      {command:'latest',description:'Latest saved briefing'},{command:'schedule',description:'View or change daily delivery'},
+      {command:'preferences',description:'View your settings'},{command:'help',description:'Help and examples'}]},signal);
   }
   async inspectConnection():Promise<{reachable:boolean;webhookConfigured:boolean;pendingUpdates:number}> {
     z.object({id:z.number().int().positive()}).parse(await this.call('getMe',{}));
