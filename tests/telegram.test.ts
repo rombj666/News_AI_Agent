@@ -35,6 +35,16 @@ async function fixture(withDigest=false,provider:LanguageModel=telegramFixtureMo
   return {telegramId,userId,transport,logs,identities,handle,digest};
 }
 const last=(transport:FakeTelegram)=>transport.sent.at(-1)!.message;
+test('production news callback is not acknowledged again by cron; status is absent from history',async()=>{
+  const f=await fixture();
+  const handle=createTelegramRouter({db:db.runtime,botId:'123456',identities:f.identities,transport:f.transport,
+    ai:null,newsNow:async()=>null,newsCallbackAcknowledgedAtIngress:true,now:()=>now});
+  assert.equal(await handle(callbackUpdate(99001,f.telegramId,'nav:news')),'completed');
+  assert.equal(f.transport.acknowledgements.length,0);
+  const messages=await asUser(db.runtime,f.userId,tx=>tx.query<{content:string}>('SELECT content FROM messages'));
+  assert.ok(messages.rows.length>0);
+  assert.ok(messages.rows.every(row=>!row.content.includes('Searching for fresh news')));
+});
 const ownRows=(userId:string,table:string)=>asUser(db.runtime,userId,tx=>tx.query(`SELECT * FROM ${table}`));
 function faultDatabase(match:string):Database {
   return {...db.runtime,transaction:work=>db.runtime.transaction(tx=>work({...tx,query:async(sql,params)=>{

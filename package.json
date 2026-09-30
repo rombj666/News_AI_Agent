@@ -29,7 +29,8 @@
     "schedule:settings": "node --env-file-if-exists=.env --import tsx scripts/schedule-settings.ts",
     "demo:scheduler": "tsx --import ./scripts/offline-guard.mjs scripts/scheduler-demo.ts",
     "telegram:diagnose": "node --env-file-if-exists=.env --import tsx scripts/telegram-diagnose.ts",
-    "images:diagnose": "node --env-file-if-exists=.env --import tsx scripts/images-diagnose.ts"
+    "images:diagnose": "node --env-file-if-exists=.env --import tsx scripts/images-diagnose.ts",
+    "telegram:set-commands": "node --env-file-if-exists=.env --import tsx scripts/telegram-set-commands.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "1.1.0",

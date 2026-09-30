@@ -40,7 +40,7 @@ function userError(error:unknown):string {
   return "I couldn't process that request right now.";
 }
 export function createTelegramRouter(deps:{db:Database;botId:string;identities:ReadonlyMap<string,string>;
-  transport:TelegramDelivery;ai:Parameters<typeof respondToNews>[2];newsNow?:NewsNowHandler;now?:()=>Date;log?:(code:string)=>void}) {
+  transport:TelegramDelivery;ai:Parameters<typeof respondToNews>[2];newsNow?:NewsNowHandler;newsCallbackAcknowledgedAtIngress?:boolean;now?:()=>Date;log?:(code:string)=>void}) {
   const {db,botId,identities,transport}=deps;
   const log=deps.log??(()=>{});
   return async (raw:unknown,signal?:AbortSignal):Promise<'ignored'|'unauthorized'|'duplicate'|'completed'|'failed'>=>{
@@ -50,7 +50,7 @@ export function createTelegramRouter(deps:{db:Database;botId:string;identities:R
     const message=callback?.message??update.message, sender=callback?.from??message?.from;
     if(!message||!sender||sender.is_bot||message.chat.type!=='private'||message.chat.id!==sender.id) return 'ignored';
     const chatId=String(message.chat.id),senderId=String(sender.id);
-    const acknowledge=async(text:string)=>{if(callback) try{await transport.answerCallback(callback.id,text,signal);}catch{log('TELEGRAM_CALLBACK_ACK_FAILED');}};
+    const acknowledge=async(text:string)=>{if(callback&&!(deps.newsCallbackAcknowledgedAtIngress&&callback.data==='nav:news')) try{await transport.answerCallback(callback.id,text,signal);}catch{log('TELEGRAM_CALLBACK_ACK_FAILED');}};
     let userId:string;
     try {authorizeTelegramUser(senderId,[...identities.keys()]);userId=identities.get(senderId)!;}
     catch {

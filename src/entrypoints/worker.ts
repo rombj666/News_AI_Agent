@@ -4,6 +4,8 @@ import { neonDatabase } from '../db/neon.js';
 import { enqueueUpdate,isNewsUpdate } from '../production/inbox.js';
 import { telegramUpdateSchema,type TelegramUpdate } from '../adapters/telegram/types.js';
 import { BraveConfigError } from '../retrieval/brave-config.js';
+import { ScheduleConfigError } from '../scheduling/config.js';
+import { acknowledgeNewsUpdate } from '../production/news-status.js';
 
 async function secretMatches(actual:string|null,expected:string|undefined) {
   if(!actual||!expected||!/^[A-Za-z0-9_-]{32,256}$/.test(expected))return false;
@@ -30,7 +32,7 @@ export function createWorker(deps={
     const connection=neonDatabase(config.runtimeUrl,'news_runtime');
     try{return await enqueueUpdate(connection.db,userId,config.telegram.botId,update);}finally{await connection.close();}
   },
-}) {
+},acknowledge=acknowledgeNewsUpdate) {
   return {
     async fetch(request:Request,env:ProductionEnv={},ctx?:{waitUntil(promise:Promise<unknown>):void}):Promise<Response> {
       const path=new URL(request.url).pathname;
@@ -38,7 +40,7 @@ export function createWorker(deps={
       if(request.method==='GET'&&path==='/ready') {
         if(!await secretMatches(request.headers.get('Authorization')?.replace(/^Bearer /,'')??null,env.PRODUCTION_HEALTH_SECRET))return new Response(null,{status:403});
         try{await deps.ready(env);return Response.json({status:'ready'});}catch(error){
-          if(error instanceof BraveConfigError)console.error(`PRODUCTION_READINESS_FIELDS: ${error.fields.filter(f=>/^[A-Z_]+$/.test(f)).join(',')}`);
+          if(error instanceof BraveConfigError||error instanceof ScheduleConfigError)console.error(`PRODUCTION_READINESS_FIELDS: ${error.fields.filter(f=>/^[A-Z_]+$/.test(f)).join(',')}`);
           console.error('PRODUCTION_READINESS_FAILED');return Response.json({status:'not_ready'},{status:503});}
       }
       if(path!=='/telegram/webhook')return new Response(null,{status:404});
@@ -53,7 +55,10 @@ export function createWorker(deps={
         const inserted=await deps.enqueue(config,userId,update);
         // HTTP waitUntil is short-lived. The existing minute cron drains heavy
         // news work in a scheduled event; lightweight replies still run promptly.
-        if(inserted&&ctx&&!isNewsUpdate(update))ctx.waitUntil(deps.processInbox(env,[userId],true));
+        if(inserted&&isNewsUpdate(update)) {
+          const status=acknowledge(config,update).catch(()=>{console.error('TELEGRAM_NEWS_ACK_FAILED');});
+          if(ctx)ctx.waitUntil(status);else await status;
+        } else if(inserted&&ctx)ctx.waitUntil(deps.processInbox(env,[userId],true));
         return new Response(null,{status:200});
       }catch{console.error('PRODUCTION_WEBHOOK_PERSIST_FAILED');return new Response(null,{status:503});}
     },

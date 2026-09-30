@@ -108,7 +108,7 @@ https://developers.openai.com/api/docs/models/gpt-5.6-luna
 
 1. Review and supply approved budgets/pricing. Run `npm run production:check-config`.
 2. Only after it passes, change `PRODUCTION_SCHEDULE_ENABLED` from `NO` to `YES` if automatic delivery should be enabled.
-3. Run `npm run check`, `npm test`, `npm run demo:telegram`, and `npm run demo:foundation`.
+3. Run `npm run check`, `npm test`, `npm run demo:telegram`, and `npm run demo`.
 4. Apply migration `0011_news_now.sql` using the owner migration path, then the updated `scripts/production-grants.sql`.
 5. Add missing secrets interactively with `npx wrangler secret put NAME --name personalized-news-ai-agent`. Secret writes deploy a Worker version, so do this only in the deployment window.
 6. Deploy with `npx wrangler deploy --name personalized-news-ai-agent` and tail with `npx wrangler tail personalized-news-ai-agent --format pretty`.
@@ -128,3 +128,42 @@ unavailable.`), genuine no-results (`I couldn't find enough fresh news for that
 request.`), and ranking/digest failures (`I found news, but couldn't prepare the
 briefing right now.`). Logs and persisted fields retain safe codes without response
 bodies, keys, URLs, private messages or preferences.
+
+## Production UX/runtime follow-up
+
+Update Telegram's six-command menu explicitly from this project directory:
+
+```powershell
+npm run telegram:set-commands
+```
+
+This loads `TELEGRAM_BOT_TOKEN` from the ignored local `.env` (or the process
+environment), constructs `TelegramApi`, calls only `setMyCommands`, prints
+`TELEGRAM_COMMANDS_UPDATED`, and exits. It does not poll, alter the webhook,
+send messages, or run automatically on Worker invocations. Failure prints only
+`TELEGRAM_COMMANDS_UPDATE_FAILED` and exits nonzero. npm may print its script banner.
+
+After a successful new inbox insert, heavy requests send an immediate informational
+status through HTTP `waitUntil`; News now buttons instead receive a callback
+acknowledgement. Cron still performs retrieval and generation. Status is not saved
+in conversation history. Duplicate inbox inserts never repeat it. Failed or
+interrupted status sends are not retried: delivery may be uncertain, but the durable
+news request remains pending for cron. Cron does not acknowledge that button again.
+
+Deploy this patch only when ready, without changing schedule settings or secrets:
+
+```powershell
+npx wrangler deploy --name personalized-news-ai-agent
+```
+
+For one production diagnostic request:
+
+1. Start `npx wrangler tail personalized-news-ai-agent --format pretty` before sending anything.
+2. Send `/news` **once** from the allowlisted private Telegram chat. Expect the informational status promptly. Leave the tail running through the next minute cron and until completion or failure.
+3. Inspect `LIVE_NEWS_CONFIG_FIELDS: FIELD1,FIELD2` for missing or invalid scheduling or Brave fields. Scheduling validation runs first; once its fields are corrected, Brave validation may report additional fields. Only field names are logged, never values.
+4. Inspect `TELEGRAM_APPLICATION_REQUEST_FAILED: CODE` for `LIVE_NEWS_CONFIGURATION_INVALID`, `BRAVE_BUDGET_EXCEEDED`, `BRAVE_COLLECTION_FAILED`, `BRAVE_HTTP_*`, `BRAVE_RESPONSE_INVALID`, budget errors, or `MODEL_*` failures. Existing typed error codes remain intact. `TELEGRAM_NEWS_ACK_FAILED` concerns only the status send; `PRODUCTION_WEBHOOK_PERSIST_FAILED` concerns intake, and `PRODUCTION_TICK_FAILED` concerns cron.
+5. If the request never reaches live-news validation, inspect the earlier production configuration/readiness failure and run `npm run production:check-config` against matching local bindings. This offline check reflects local configuration, not proof of deployed values. Do not print or paste credentials. Invalid Telegram/production bindings can fail before `newsNowConfig` runs.
+6. Stop the tail with Ctrl+C. Use the observed code to choose the next fix. Do not repeatedly send `/news`: each new Telegram update is a distinct potentially billable request.
+
+No production root cause is claimed from offline validation. These diagnostics must
+be observed after deployment to identify the actual failing configuration or provider.

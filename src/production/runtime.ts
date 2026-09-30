@@ -12,9 +12,8 @@ import { runScheduledPipeline } from '../scheduling/pipeline.js';
 import type { CollectionSource } from '../scheduling/collection.js';
 import { drainInbox,isNewsUpdate } from './inbox.js';
 import type { Fetcher } from '../retrieval/http.js';
-import { configuredNewsNow,newsNowConfig } from './news.js';
+import { configuredNewsNow,newsNowConfig,validatedNewsNowConfig } from './news.js';
 import { NewsNowError } from '../services/news-now.js';
-import { BraveConfigError } from '../retrieval/brave-config.js';
 
 const workerFetch:Fetcher=(url,init)=>globalThis.fetch(url,init);
 export function productionDatabases(config:ReturnType<typeof productionConfig>) {
@@ -52,13 +51,10 @@ export async function processInteractiveInbox(env:ProductionEnv,userIds?:readonl
     const transport=new TelegramApi(config.telegram.token,workerFetch,1100,console.log);
     const model=config.telegram.aiEnabled?new OpenAIResponses(env):null;
     const router=createTelegramRouter({db:connection.db,botId:config.telegram.botId,identities:config.identities,transport,
-      ai:model?{model,limits:config.telegram.limits!}:null,log:console.log,
+      ai:model?{model,limits:config.telegram.limits!}:null,log:console.log,newsCallbackAcknowledgedAtIngress:true,
       newsNow:async request=>{
         if(!model)throw new NewsNowError('LIVE_NEWS_AI_DISABLED','retrieval');
-        try {newsNowConfig(env);}catch(error) {
-          if(error instanceof BraveConfigError)console.log(`LIVE_NEWS_CONFIG_FIELDS: ${error.fields.join(',')}`);
-          throw new NewsNowError('LIVE_NEWS_CONFIGURATION_INVALID','retrieval');
-        }
+        validatedNewsNowConfig(env,console.log);
         const databases=productionDatabases(config);
         try{return await configuredNewsNow(env,{...databases,runtime:connection.db},model,config.sources)(request);}
         finally{await databases.close();}

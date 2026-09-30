@@ -1,5 +1,14 @@
 # Roadmap and current status
 
+2026-09-30 NEWS-NOW production follow-up: explicit `telegram:set-commands` operator
+script, new-inbox-only transport acknowledgement, and field-only scheduling/Brave
+configuration diagnostics implemented locally. Heavy work remains on minute cron;
+no migrations, production settings, or saved preferences changed. See
+[operator and diagnostic procedure](NEWS_NOW.md#production-uxruntime-follow-up).
+Deployment and production root-cause diagnosis remain unperformed.
+Validation: `npm run check`, all 250 offline tests, `npm run demo:telegram`, and
+`npm run demo` passed. No real provider calls, menu update, or deployment performed.
+
 Implementation authorized on 2026-09-17. Work proceeds milestone by milestone from NEWS_AI_PROJECT_SPEC.md.
 
 News-now milestone (2026-09-30): implemented fresh `/news`, saved `/latest`,

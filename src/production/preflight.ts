@@ -28,7 +28,7 @@ export function productionPreflight(env:ProductionEnv):ConfigResult[] {
     productionSchedulingConfig(env,config);
     results.push({name:'SCHEDULE_CONFIG',fields:[]});
   }catch(error){
-    const names=error instanceof ScheduleConfigError?error.message.split(': ')[1]?.split(', '):undefined;
+    const names=error instanceof ScheduleConfigError?error.fields:undefined;
     results.push({name:'SCHEDULE_CONFIG',fields:names??['PRODUCTION_CONFIGURATION']});
   }
   return results;

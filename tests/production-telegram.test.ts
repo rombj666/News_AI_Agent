@@ -109,7 +109,7 @@ test('webhook persists before waitUntil processing and duplicate receipt schedul
 });
 test('news webhook persists heavy work for cron rather than HTTP waitUntil',async()=>{
   let persisted=0,processed=0;
-  const worker=createWorker({ready:async()=>{},tick:async()=>{},enqueue:async()=>{persisted++;return true;},processInbox:async()=>{processed++;}});
+  const worker=createWorker({ready:async()=>{},tick:async()=>{},enqueue:async()=>{persisted++;return true;},processInbox:async()=>{processed++;}},async()=>{});
   const pending:Promise<unknown>[]=[];
   for(const text of ['/news',"What's happening with NVIDIA today?"]) {
     const request=new Request('https://worker.test/telegram/webhook',{method:'POST',headers:{
@@ -117,7 +117,7 @@ test('news webhook persists heavy work for cron rather than HTTP waitUntil',asyn
         message:{message_id:90,date:1,from:{id:12345,is_bot:false},chat:{id:12345,type:'private'},text}})});
     assert.equal((await worker.fetch(request,productionEnv,{waitUntil:p=>pending.push(p)})).status,200);
   }
-  assert.equal(persisted,2);assert.equal(processed,0);assert.equal(pending.length,0);
+  assert.equal(persisted,2);assert.equal(processed,0);assert.equal(pending.length,2);await Promise.all(pending);
 });
 
 test('Worker database transaction destroys its connection before subsequent outbound work',async()=>{
