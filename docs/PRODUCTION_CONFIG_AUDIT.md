@@ -22,20 +22,18 @@ Changed files: `src/production/runtime.ts` (shared validation/test injection),
 `tests/telegram.test.ts` (regressions), this audit and `docs/ROADMAP.md`.
 No SQL migration or deployed configuration was changed.
 
-`wrangler.jsonc` currently has `PRODUCTION_SCHEDULE_ENABLED=NO`. `productionTick`
-drains the interactive inbox, then returns before collection/ranking/digest. This
-explains the disabled automatic generation despite the every-minute cron.
-
-**The switch remains NO until approved ranking/digest budgets and required bindings
-are validated.** No budget amounts were supplied and none were invented. The next
-configuration change is `PRODUCTION_SCHEDULE_ENABLED=YES` after the preflight below.
-Do not deploy the candidate until this gate is satisfied.
+The 2026-09-29 audit found `PRODUCTION_SCHEDULE_ENABLED=NO`, which explained why
+the every-minute cron drained interactive messages but skipped scheduled generation.
+The switch was found as `YES` when the 2026-09-30 news-now task began, but local
+preflight cannot validate the required secrets and approved budgets. It is therefore
+checked in as `NO` under the explicit no-enable requirement. No budget amount was
+invented and no deployment was performed in either implementation pass.
 
 ## Bindings
 
 | Binding | Storage | Audit |
 | --- | --- | --- |
-| `PRODUCTION_SCHEDULE_ENABLED` | var | NO; change to YES only after validation |
+| `PRODUCTION_SCHEDULE_ENABLED` | var | Current checkout: NO; deployed value unverified |
 | `TELEGRAM_AI_ENABLED` | var | YES |
 | `OPENAI_MODEL` | var | `gpt-5.6-luna`, locked; no fallback |
 | `MAX_INPUT_TOKENS`, `MAX_OUTPUT_TOKENS` | vars | 12000 / 2000 |
@@ -181,8 +179,8 @@ It must report `PRODUCTION_SCHEDULE_CONFIG_VALID`. Failure reports only field na
 or a fixed code. It does not download/decrypt deployed secrets or prove live access.
 The current Wrangler file is strict JSON; retain that format for this preflight.
 
-After approval/validation, edit only `PRODUCTION_SCHEDULE_ENABLED` to `YES` in
-`wrangler.jsonc`, retain the cron and other settings, then run:
+After approved values and bindings validate, retain the intended schedule switch,
+cron and other settings, then run:
 
 ```sh
 npm run check

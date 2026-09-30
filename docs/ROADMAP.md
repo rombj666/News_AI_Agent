@@ -2,6 +2,12 @@
 
 Implementation authorized on 2026-09-17. Work proceeds milestone by milestone from NEWS_AI_PROJECT_SPEC.md.
 
+News-now milestone (2026-09-30): implemented fresh `/news`, saved `/latest`,
+deterministic current-news/preference/schedule routing, `/schedule` proposals,
+Brave-first interactive retrieval plus RSS/dedup/quality, persisted paid-work claims,
+safe preflight and an explicit opt-in live integration check. See
+[NEWS_NOW.md](NEWS_NOW.md). No live checks or deployment were performed.
+
 Production audit follow-up (2026-09-29): shared readiness/execution validation now
 covers optional Brave configuration; production tick and preference diagnostics
 have added offline regression coverage. See [audit and deployment runbook](PRODUCTION_CONFIG_AUDIT.md).

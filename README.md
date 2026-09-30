@@ -5,8 +5,9 @@ Canonical project: `C:\Users\rombj\Downloads\News_AI_Agent`.
 TypeScript personal news assistant: shared RSS/Brave collection, deterministic
 freshness/clustering, OpenAI `gpt-5.6-luna` ranking and saved digests, Telegram
 commands, feedback and confirmed preferences. Milestone 6 is user-reported live
-verified. Milestone 7 adds local daily scheduling. Production deployment remains
- deferred. `/news` displays saved digests without billable generation.
+verified. Milestone 7 adds local daily scheduling. `/news` generates fresh
+source-linked news; `/latest` displays the last saved digest without billable
+generation. See `docs/NEWS_NOW.md`. This checkout does not prove deployment state.
 
 ## Offline validation
 
